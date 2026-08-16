@@ -870,6 +870,8 @@ class ConfigManager:
             "last_view_category": "全部",
             # v3.0.1 分类重命名/删除 总开关（设置-导航设置里可切换）
             "category_rename_enabled": True,
+            # v3.0.1 分类自定义顺序（不含「全部」）
+            "category_order": [],
         }
 
     @staticmethod
@@ -1265,8 +1267,50 @@ class ConfigManager:
         self.save()
 
     def get_shortcut_categories(self):
-        cats = set(s.get("category", "默认") for s in self.shortcuts)
-        return sorted(cats) if cats else ["默认"]
+        cats_raw = set(s.get("category", "默认") for s in self.shortcuts)
+        if not cats_raw:
+            return ["默认"]
+        cats = list(cats_raw)
+        try:
+            order = self.get_cat_order()
+        except Exception:
+            order = []
+        # 按已记录的顺序排前面；未记录的按字母序追加到后面
+        ordered = [c for c in order if c in cats]
+        rest = sorted([c for c in cats if c not in ordered])
+        return ordered + rest if (ordered or not rest) else rest
+
+    def get_cat_order(self):
+        """获取分类自定义顺序（不包含「全部」）"""
+        try:
+            s = self._read_settings()
+            return list(s.get("category_order", []))
+        except Exception:
+            return []
+
+    def set_cat_order(self, order_list):
+        """设置分类顺序（只接受不含「全部」的真实分类列表）"""
+        try:
+            filtered = [str(c) for c in order_list if str(c) != "全部"]
+            self._write_settings({"category_order": filtered})
+        except Exception:
+            pass
+
+    def swap_cat_order(self, cat_a, cat_b):
+        """交换两个分类的位置（都不含「全部」）"""
+        try:
+            order = self.get_cat_order()
+            # 确保 order 已包含所有当前分类（避免新分类不在列表里导致交换无效）
+            cats_raw = set(s.get("category", "默认") for s in self.shortcuts)
+            for c in cats_raw:
+                if c not in order:
+                    order.append(c)
+            if cat_a in order and cat_b in order:
+                ia, ib = order.index(cat_a), order.index(cat_b)
+                order[ia], order[ib] = order[ib], order[ia]
+                self.set_cat_order(order)
+        except Exception:
+            pass
 
     def rename_category(self, old_name, new_name):
         """重命名分类"""
@@ -1609,119 +1653,139 @@ class SetupPasswordFrame(ctk.CTkFrame):
 # ============================================================
 def _get_daily_quote(now=None):
     """根据日期取稳定的「每日金句」（同一天永远返回同一句，跨会话一致）
-    策略：以日期（年月日）为种子，对金句列表取模；必要时也可用 hash 映射"""
+    中英双语版：返回 (cn_text, en_text, author)
+    策略：以日期（年月日）为种子，对金句列表取模"""
     QUOTES = [
-        # ---- 先秦典籍 ----
-        ("千里之行，始于足下", "老子《道德经》"),
-        ("合抱之木，生于毫末；九层之台，起于累土", "老子《道德经》"),
-        ("上善若水，水善利万物而不争", "老子《道德经》"),
-        ("天下难事，必作于易；天下大事，必作于细", "老子《道德经》"),
-        ("不积跬步，无以至千里；不积小流，无以成江海", "荀子《劝学》"),
-        ("锲而舍之，朽木不折；锲而不舍，金石可镂", "荀子《劝学》"),
-        ("青，取之于蓝，而青于蓝", "荀子《劝学》"),
-        ("生于忧患，死于安乐", "孟子《告子下》"),
-        ("富贵不能淫，贫贱不能移，威武不能屈", "孟子《滕文公下》"),
-        ("穷则独善其身，达则兼善天下", "孟子《尽心上》"),
-        ("天将降大任于斯人也，必先苦其心志，劳其筋骨", "孟子《告子下》"),
-        ("志不强者智不达，言不信者行不果", "墨子《修身》"),
-        ("路漫漫其修远兮，吾将上下而求索", "屈原《离骚》"),
-        ("博学之，审问之，慎思之，明辨之，笃行之", "《礼记·中庸》"),
-        ("凡事预则立，不预则废", "《礼记·中庸》"),
-        ("苟日新，日日新，又日新", "《礼记·大学》"),
-        ("天行健，君子以自强不息", "《周易·乾卦》"),
-        ("地势坤，君子以厚德载物", "《周易·坤卦》"),
-        ("满招损，谦受益", "《尚书·大禹谟》"),
-        ("他山之石，可以攻玉", "《诗经·小雅》"),
-        ("授人以鱼，不如授人以渔", "《淮南子·说林训》"),
-        # ---- 《论语》 ----
-        ("学而时习之，不亦说乎", "《论语·学而》"),
-        ("温故而知新，可以为师矣", "《论语·为政》"),
-        ("学而不思则罔，思而不学则殆", "《论语·为政》"),
-        ("知之为知之，不知为不知，是知也", "《论语·为政》"),
-        ("三人行，必有我师焉；择其善者而从之，其不善者而改之", "《论语·述而》"),
-        ("士不可以不弘毅，任重而道远", "《论语·泰伯》"),
-        ("三军可夺帅也，匹夫不可夺志也", "《论语·子罕》"),
-        ("知者不惑，仁者不忧，勇者不惧", "《论语·子罕》"),
-        ("工欲善其事，必先利其器", "《论语·卫灵公》"),
-        ("己所不欲，勿施于人", "《论语·卫灵公》"),
-        ("过而不改，是谓过矣", "《论语·卫灵公》"),
-        ("敏而好学，不耻下问", "《论语·公冶长》"),
-        # ---- 汉魏六朝 ----
-        ("少壮不努力，老大徒伤悲", "汉乐府《长歌行》"),
-        ("一寸光阴一寸金，寸金难买寸光阴", "王贞白《白鹿洞》"),
-        ("盛年不重来，一日难再晨；及时当勉励，岁月不待人", "陶渊明《杂诗》"),
-        ("非淡泊无以明志，非宁静无以致远", "诸葛亮《诫子书》"),
-        ("静以修身，俭以养德", "诸葛亮《诫子书》"),
-        ("志当存高远", "诸葛亮《诫外甥书》"),
-        # ---- 唐宋 ----
-        ("业精于勤，荒于嬉；行成于思，毁于随", "韩愈《进学解》"),
-        ("黑发不知勤学早，白首方悔读书迟", "颜真卿《劝学诗》"),
-        ("莫等闲，白了少年头，空悲切", "岳飞《满江红》"),
-        ("纸上得来终觉浅，绝知此事要躬行", "陆游《冬夜读书示子聿》"),
-        ("不畏浮云遮望眼，自缘身在最高层", "王安石《登飞来峰》"),
-        ("长风破浪会有时，直挂云帆济沧海", "李白《行路难》"),
-        ("会当凌绝顶，一览众山小", "杜甫《望岳》"),
-        ("读书破万卷，下笔如有神", "杜甫《奉赠韦左丞丈二十二韵》"),
-        ("千磨万击还坚劲，任尔东西南北风", "郑燮《竹石》"),
-        ("古之立大事者，不惟有超世之才，亦必有坚忍不拔之志", "苏轼《晁错论》"),
-        ("人生在勤，不索何获", "张衡"),
-        ("读万卷书，行万里路", "刘彝《画旨》"),
-        ("海内存知己，天涯若比邻", "王勃《送杜少府之任蜀州》"),
-        ("欲穷千里目，更上一层楼", "王之涣《登鹳雀楼》"),
-        ("沉舟侧畔千帆过，病树前头万木春", "刘禹锡《酬乐天扬州初逢席上见赠》"),
-        ("山重水复疑无路，柳暗花明又一村", "陆游《游山西村》"),
-        ("问渠那得清如许，为有源头活水来", "朱熹《观书有感》"),
-        ("旧书不厌百回读，熟读深思子自知", "苏轼《送安惇秀才失解西归》"),
-        # ---- 明清 ----
-        ("宝剑锋从磨砺出，梅花香自苦寒来", "《警世贤文·勤奋篇》"),
-        ("学如逆水行舟，不进则退", "《增广贤文》"),
-        ("不为外撼，不以物移，而后可以任天下之大事", "吕坤《呻吟语》"),
-        ("天下兴亡，匹夫有责", "顾炎武《日知录》"),
-        ("苟利国家生死以，岂因祸福避趋之", "林则徐《赴戍登程口占示家人》"),
-        ("人生自古谁无死，留取丹心照汗青", "文天祥《过零丁洋》"),
-        ("粉骨碎身浑不怕，要留清白在人间", "于谦《石灰吟》"),
-        ("我自横刀向天笑，去留肝胆两昆仑", "谭嗣同《狱中题壁》"),
-        ("海纳百川，有容乃大；壁立千仞，无欲则刚", "林则徐题联"),
-        # ---- 中国近现代 ----
-        ("时间就像海绵里的水，只要愿挤，总还是有的", "鲁迅"),
-        ("世上无难事，只要肯登攀", "毛泽东《水调歌头·重上井冈山》"),
-        ("数风流人物，还看今朝", "毛泽东《沁园春·雪》"),
-        ("一万年太久，只争朝夕", "毛泽东《满江红·和郭沫若同志》"),
-        ("为中华之崛起而读书", "周恩来"),
-        ("把每一件简单的事做好就是不简单，把每一件平凡的事做好就是不平凡", "张瑞敏"),
-        ("千锤百炼，方能成钢", "中国谚语"),
-        # ---- 西方经典 ----
-        ("成功的秘诀，在永不改变既定的目的", "卢梭"),
-        ("生活就像海洋，只有意志坚强的人才能到达彼岸", "马克思"),
-        ("天才是百分之一的灵感加百分之九十九的汗水", "爱迪生"),
-        ("世界上只有一种真正的英雄主义，那就是在认清生活的真相之后依然热爱生活", "罗曼·罗兰"),
-        ("不要因为走得太远，而忘记为什么出发", "纪伯伦"),
-        ("所有的胜利，与征服自己的胜利比起来，都是微不足道", "柏拉图"),
-        ("合理安排时间，就等于节约时间", "培根"),
-        ("种一棵树最好的时间是十年前，其次是现在", "丹比萨·莫约"),
-        ("我思故我在", "笛卡尔"),
-        ("认识你自己", "苏格拉底"),
-        ("逆境是通往真理的最可靠的道路", "拜伦"),
-        ("天才就是无止境刻苦勤奋的能力", "卡莱尔"),
-        ("失败也是我需要的，它和成功一样对我有价值", "爱默生"),
-        ("完成永远比完美更重要", "谢丽尔·桑德伯格"),
-        ("如果你不能飞，就奔跑；如果你不能奔跑，就走；如果你不能走，就爬", "马丁·路德·金"),
-        ("智者说话因为他们有话说；蠢人说话因为他们必须说点什么", "柏拉图"),
-        ("教育的根是苦的，但其果实是甜的", "亚里士多德"),
-        ("优于别人并不高贵，真正的高贵应该是优于过去的自己", "海明威"),
-        ("行动是治愈恐惧的良药，而犹豫拖延将不断滋养恐惧", "戴尔·卡耐基"),
-        ("不要为成功而努力，要为做一个有价值的人而努力", "爱因斯坦"),
-        ("逻辑会带你从A到B，想象力能带你去任何地方", "爱因斯坦"),
-        ("钟不敲不响，人不学不灵", "英国谚语"),
-        ("早起的鸟儿有虫吃", "英国谚语"),
-        ("罗马不是一天建成的", "西方谚语"),
+        # ---- 中国经典 / Chinese Classics ----
+        ("千里之行，始于足下",
+         "A journey of a thousand miles begins with a single step.",
+         "老子《道德经》 / Laozi, Tao Te Ching"),
+        ("合抱之木，生于毫末；九层之台，起于累土",
+         "A tree so thick it takes two arms to embrace grows from a tiny sprout; a nine-story tower rises from a basket of earth.",
+         "老子《道德经》 / Laozi, Tao Te Ching"),
+        ("上善若水，水善利万物而不争",
+         "The highest goodness is like water; water benefits all things and does not compete with them.",
+         "老子《道德经》 / Laozi, Tao Te Ching"),
+        ("不积跬步，无以至千里；不积小流，无以成江海",
+         "Not accumulating small steps, you cannot reach a thousand miles; not gathering tiny streams, you cannot form a river or sea.",
+         "荀子《劝学》 / Xunzi, Exhortation to Learning"),
+        ("锲而舍之，朽木不折；锲而不舍，金石可镂",
+         "If you chisel and give up, even rotten wood will not break; if you chisel without stopping, even metal and stone can be carved.",
+         "荀子《劝学》 / Xunzi, Exhortation to Learning"),
+        ("生于忧患，死于安乐",
+         "Thrive in calamity and perish in soft living.",
+         "孟子《告子下》 / Mencius"),
+        ("天行健，君子以自强不息",
+         "As heaven moves ever onward, so the noble person never ceases to strive for self-improvement.",
+         "《周易·乾卦》 / I Ching, Hexagram Qian"),
+        ("地势坤，君子以厚德载物",
+         "The earth is vast and receptive; the noble person holds all things with profound virtue.",
+         "《周易·坤卦》 / I Ching, Hexagram Kun"),
+        ("苟日新，日日新，又日新",
+         "If you can renew yourself one day, do so every day, and keep renewing day after day.",
+         "《礼记·大学》 / Book of Rites, Great Learning"),
+        ("博学之，审问之，慎思之，明辨之，笃行之",
+         "Learn broadly, inquire thoroughly, think carefully, distinguish clearly, and practice firmly.",
+         "《礼记·中庸》 / Book of Rites, Doctrine of the Mean"),
+        ("路漫漫其修远兮，吾将上下而求索",
+         "The road ahead is long and far; I will search high and low.",
+         "屈原《离骚》 / Qu Yuan, Li Sao"),
+        ("己所不欲，勿施于人",
+         "Do not do to others what you would not want done to yourself.",
+         "《论语·卫灵公》 / Analects, Duke Ling of Wei"),
+        ("学而不思则罔，思而不学则殆",
+         "Learning without thought is labor lost; thought without learning is perilous.",
+         "《论语·为政》 / Analects, Government"),
+        ("三人行，必有我师焉",
+         "When I walk along with two others, they may serve me as my teachers.",
+         "《论语·述而》 / Analects, No. 7"),
+        ("士不可以不弘毅，任重而道远",
+         "A gentleman must be resolute and enduring; his burden is heavy and his road is long.",
+         "《论语·泰伯》 / Analects, No. 8"),
+        ("非淡泊无以明志，非宁静无以致远",
+         "Without tranquility one cannot have a clear purpose; without calm one cannot reach far.",
+         "诸葛亮《诫子书》 / Zhuge Liang"),
+        ("志当存高远",
+         "Be ambitious and reach for the stars.",
+         "诸葛亮《诫外甥书》 / Zhuge Liang"),
+        ("业精于勤，荒于嬉；行成于思，毁于随",
+         "Excellence in work comes from diligence; it is wasted through idle play. Actions succeed from reflection; they fail from blind conformity.",
+         "韩愈《进学解》 / Han Yu"),
+        ("读书破万卷，下笔如有神",
+         "Having read ten thousand volumes, one writes as if guided by the gods.",
+         "杜甫《奉赠韦左丞丈二十二韵》 / Du Fu"),
+        ("会当凌绝顶，一览众山小",
+         "One day I shall reach the highest summit and see all mountains shrink below.",
+         "杜甫《望岳》 / Du Fu"),
+        ("长风破浪会有时，直挂云帆济沧海",
+         "A time will come to ride the wind and cleave the waves; I will set my cloud-white sail to cross the great sea.",
+         "李白《行路难》 / Li Bai"),
+        ("纸上得来终觉浅，绝知此事要躬行",
+         "What you get from books is always shallow; true understanding comes only from doing it yourself.",
+         "陆游《冬夜读书示子聿》 / Lu You"),
+        ("山重水复疑无路，柳暗花明又一村",
+         "Where hills bend and streams wind, the road seems to end; past willow shade and bright blooms, another village appears.",
+         "陆游《游山西村》 / Lu You"),
+        ("问渠那得清如许，为有源头活水来",
+         "Why is the channel so clear? Because fresh water flows from its source.",
+         "朱熹《观书有感》 / Zhu Xi"),
+        ("宝剑锋从磨砺出，梅花香自苦寒来",
+         "A sword\'s sharp edge comes from grinding; a plum blossom\'s fragrance comes from bitter cold.",
+         "《警世贤文》 / Ancient Proverbs"),
+        ("海纳百川，有容乃大；壁立千仞，无欲则刚",
+         "The ocean embraces all rivers; with tolerance comes greatness. A cliff stands a thousand feet tall; without desire, one is strong.",
+         "林则徐 / Lin Zexu"),
+        ("天下兴亡，匹夫有责",
+         "The rise and fall of the nation is every person\'s responsibility.",
+         "顾炎武 / Gu Yanwu"),
+        ("时间就像海绵里的水，只要愿挤，总还是有的",
+         "Time is like water in a sponge; if you are willing to squeeze, there is always some.",
+         "鲁迅 / Lu Xun"),
+        # ---- 西方经典 / Western Classics ----
+        ("种一棵树最好的时间是十年前，其次是现在",
+         "The best time to plant a tree was 20 years ago. The second best time is now.",
+         "丹比萨·莫约 / Dambisa Moyo"),
+        ("世界上只有一种真正的英雄主义，那就是在认清生活的真相之后依然热爱生活",
+         "There is only one true heroism in the world: to see the world as it is and to love it anyway.",
+         "罗曼·罗兰 / Romain Rolland"),
+        ("我思故我在",
+         "I think, therefore I am.",
+         "笛卡尔 / René Descartes"),
+        ("认识你自己",
+         "Know thyself.",
+         "苏格拉底 / Socrates"),
+        ("不要因为走得太远，而忘记为什么出发",
+         "Do not go so far that you forget why you started.",
+         "纪伯伦 / Kahlil Gibran"),
+        ("行动是治愈恐惧的良药，而犹豫拖延将不断滋养恐惧",
+         "Action is the antidote to fear; hesitation and procrastination feed it.",
+         "戴尔·卡耐基 / Dale Carnegie"),
+        ("教育的根是苦的，但其果实是甜的",
+         "The roots of education are bitter, but the fruit is sweet.",
+         "亚里士多德 / Aristotle"),
+        ("优于别人并不高贵，真正的高贵应该是优于过去的自己",
+         "There is nothing noble in being superior to your fellow man. True nobility is in being superior to your former self.",
+         "海明威 / Ernest Hemingway"),
+        ("逻辑会带你从A到B，想象力能带你去任何地方",
+         "Logic will get you from A to B. Imagination will take you everywhere.",
+         "爱因斯坦 / Albert Einstein"),
+        ("天才是百分之一的灵感加百分之九十九的汗水",
+         "Genius is one percent inspiration and ninety-nine percent perspiration.",
+         "爱迪生 / Thomas Edison"),
+        ("合理安排时间，就等于节约时间",
+         "To choose time is to save time.",
+         "培根 / Francis Bacon"),
+        ("罗马不是一天建成的",
+         "Rome was not built in a day.",
+         "西方谚语 / Western Proverb"),
     ]
     if now is None:
+        from datetime import datetime
         now = datetime.now()
-    # 把年月日合并成整数当种子，确保同一天稳定
     seed = now.year * 10000 + now.month * 100 + now.day
     idx = seed % len(QUOTES)
     return QUOTES[idx]
+
 
 
 class BaseView(ctk.CTkFrame):
@@ -1767,42 +1831,82 @@ class HomeView(BaseView):
         weekdays_cn = ["星期一","星期二","星期三","星期四","星期五","星期六","星期日"]
         date_str = now.strftime("%Y年%m月%d日 ") + weekdays_cn[now.weekday()]
 
-        # ============ 欢迎条：垂直堆叠一体卡（彻底消除左右分栏空白） ============
-        welcome_frame = ctk.CTkFrame(self, fg_color=("gray90", "gray14"), corner_radius=16,
-                                     border_width=1, border_color=("gray83", "gray20"))
+        # ============ 欢迎条：扁平化 两栏式 一体卡（左=问候+金句，右=时钟+日期）============
+        welcome_frame = ctk.CTkFrame(self, fg_color=("gray92", "gray15"), corner_radius=20,
+                                     border_width=1, border_color=("gray85", "gray22"))
         welcome_frame.pack(fill="x", padx=30, pady=(30, 20))
 
-        # === 顶部：问候语 + 时钟组（左对齐）===
-        top_box = ctk.CTkFrame(welcome_frame, fg_color="transparent")
-        top_box.pack(side="top", anchor="w", padx=24, pady=(24, 0))
+        # 左栏：问候 + 金句
+        left_pane = ctk.CTkFrame(welcome_frame, fg_color="transparent")
+        left_pane.pack(side="left", fill="both", expand=True, padx=(32, 20), pady=28)
 
+        # 右栏：时钟 + 日期（右对齐）
+        right_pane = ctk.CTkFrame(welcome_frame, fg_color="transparent")
+        right_pane.pack(side="right", anchor="e", padx=(0, 32), pady=28)
+
+        # --- 左栏 ---
         ctk.CTkLabel(
-            top_box,
+            left_pane,
             text=f"{greeting}！",
             anchor="w",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=26, weight="bold"),
-        ).pack(side="top", anchor="w", pady=(0, 12))
+            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=24, weight="bold"),
+        ).pack(side="top", anchor="w", pady=(0, 14))
 
-        clock_block = ctk.CTkFrame(top_box, fg_color="transparent")
-        clock_block.pack(side="top", anchor="w")
+        # 中英双语金句
+        quote_cn, quote_en, quote_author = _get_daily_quote(now)
+        ctk.CTkLabel(
+            left_pane, text="Daily Quote  ·  每日金句",
+            anchor="w",
+            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=12, weight="bold"),
+            text_color=("gray55", "gray65"),
+        ).pack(anchor="w", pady=(6, 10))
 
-        clock_label = ctk.CTkLabel(
-            clock_block,
-            text="",
+        quote_cn_label = ctk.CTkLabel(
+            left_pane,
+            text=f"{quote_cn}",
             anchor="w", justify="left",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=30, weight="bold"),
+            font=ctk.CTkFont(family=("微软雅黑", "Segoe UI Variable"), size=15, weight="bold"),
+            text_color=("gray20", "gray90"),
+            wraplength=520,
+        )
+        quote_cn_label.pack(anchor="w", pady=(0, 6), fill="x")
+
+        quote_en_label = ctk.CTkLabel(
+            left_pane,
+            text=f"{quote_en}",
+            anchor="w", justify="left",
+            font=ctk.CTkFont(family=("Segoe UI Variable", "Segoe UI"), size=13),
+            text_color=("gray50", "gray62"),
+            wraplength=520,
+        )
+        quote_en_label.pack(anchor="w", pady=(0, 10), fill="x")
+
+        ctk.CTkLabel(
+            left_pane,
+            text=f"— {quote_author}",
+            anchor="w", justify="left",
+            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=11),
+            text_color=("gray50", "gray60"),
+        ).pack(anchor="w")
+
+        # --- 右栏：时钟上，日期下（Win11 风格，蓝色大号字体，右对齐）---
+        clock_label = ctk.CTkLabel(
+            right_pane,
+            text="",
+            anchor="e", justify="right",
+            font=ctk.CTkFont(family=("Segoe UI Variable", "Microsoft YaHei UI"), size=36, weight="bold"),
             text_color=("#2563EB", "#60A5FA"),
         )
-        clock_label.pack(side="top", anchor="w")
+        clock_label.pack(side="top", anchor="e")
 
         date_label = ctk.CTkLabel(
-            clock_block,
+            right_pane,
             text=f"{date_str}",
-            anchor="w", justify="left",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=14),
-            text_color=("gray45", "gray60"),
+            anchor="e", justify="right",
+            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=13),
+            text_color=("gray50", "gray62"),
         )
-        date_label.pack(side="top", anchor="w", pady=(4, 0))
+        date_label.pack(side="top", anchor="e", pady=(4, 0))
 
         # 实时时钟
         clock_label._welcome_clock_after = None
@@ -1826,50 +1930,16 @@ class HomeView(BaseView):
         _tick_welcome_clock()
         welcome_frame.bind("<Destroy>", _stop_welcome_clock, add="+")
 
-        # === 下方：每日金句卡片（fill=x 填满宽度，消除右侧孤立）===
-        quote_text, quote_author = _get_daily_quote(now)
-        quote_box = ctk.CTkFrame(
-            welcome_frame,
-            fg_color=("gray88", "gray17"),
-            corner_radius=14,
-            border_width=1,
-            border_color=("gray82", "gray22"),
-        )
-        quote_box.pack(side="top", fill="x", padx=24, pady=(18, 20))
-
-        ctk.CTkLabel(
-            quote_box, text="每日金句",
-            anchor="w",
-            font=ctk.CTkFont(family="微软雅黑", size=13, weight="bold"),
-            text_color=("gray45", "gray62"),
-        ).pack(anchor="w", padx=20, pady=(16, 8))
-
-        quote_label = ctk.CTkLabel(
-            quote_box,
-            text=f"{quote_text}",
-            anchor="w", justify="left",
-            font=ctk.CTkFont(family="微软雅黑", size=14),
-            text_color=("gray32", "gray84"),
-            wraplength=300,
-        )
-        quote_label.pack(anchor="w", padx=20, pady=(0, 8), fill="x")
-
-        def _resize_wrap(e=None):
+        # 金句响应式换行
+        def _resize_welcome(e=None):
             try:
-                w = quote_box.winfo_width() - 40
-                if w > 40:
-                    quote_label.configure(wraplength=w)
+                w = left_pane.winfo_width() - 8
+                if w > 200:
+                    quote_cn_label.configure(wraplength=w)
+                    quote_en_label.configure(wraplength=w)
             except Exception:
                 pass
-        quote_box.bind("<Configure>", lambda e: _resize_wrap())
-
-        ctk.CTkLabel(
-            quote_box,
-            text=f"— {quote_author}",
-            anchor="e", justify="right",
-            font=ctk.CTkFont(family="微软雅黑", size=12),
-            text_color=("gray45", "gray62"),
-        ).pack(anchor="e", padx=20, pady=(0, 16))
+        left_pane.bind("<Configure>", lambda e: _resize_welcome())
 
         # 统计卡片
         stats = self.config.get_stats()
@@ -4434,6 +4504,9 @@ class QuickLaunchView(BaseView):
             persisted = None
         all_cats_here = ["全部"] + self.config.get_shortcut_categories()
         self._current_cat = persisted if (persisted and persisted in all_cats_here) else "全部"
+        # v3.0.1 分类拖拽排序：临时状态
+        self._cat_drag_active_cat = None  # 拖拽中的分类名（非「全部」）
+        self._cat_drag_timer = None
 
         self._rebuild_cat_buttons()
 
@@ -5277,7 +5350,8 @@ class QuickLaunchView(BaseView):
         return "#f2f2f2" if _get_appearance() == "light" else "#1a1a1a"
 
     def _rebuild_cat_buttons(self):
-        """v3.0 分类标签重建：双保险清空 + 正确取 btn 对象 destroy，避免添加分类后旧按钮残留叠加错位"""
+        """v3.0 分类标签重建：双保险清空 + 正确取 btn 对象 destroy，避免添加分类后旧按钮残留叠加错位
+        v3.0.1 新增：非「全部」项绑定拖拽排序；更名开关关闭时锁定（cursor=arrow + 不绑拖拽）"""
         # 双保险 1：清空 cat_frame 里所有子控件（解决幽灵按钮残留叠加）
         for child in self.cat_frame.winfo_children():
             try: child.destroy()
@@ -5287,8 +5361,13 @@ class QuickLaunchView(BaseView):
             try: info["btn"].destroy()
             except Exception: pass
         self.cat_buttons = {}
+        # v3.0.1 更名开关：关闭时所有非全部项 cursor=arrow 且不绑定拖拽
+        try:
+            _rename_on = self.config.get_category_rename_enabled()
+        except Exception:
+            _rename_on = True
         cats = ["全部"] + self.config.get_shortcut_categories()
-        for cat in cats:
+        for idx, cat in enumerate(cats):
             btn = ctk.CTkButton(
                 self.cat_frame, text=f"  {cat}  ", height=30,
                 fg_color="transparent",
@@ -5296,10 +5375,21 @@ class QuickLaunchView(BaseView):
                 text_color=("gray30", "gray82"),
                 corner_radius=99,
                 font=ctk.CTkFont(family="微软雅黑", size=12),
+                # 关闭更名开关时，所有非全部项取消 command（避免短按触发切换也被当作拖拽？）
                 command=lambda c=cat: self._filter_category(c),
             )
-            if cat != "全部":
-                btn.bind("<Button-3>", lambda e, c=cat: self._cat_rightclick(e, c))
+            if cat == "全部":
+                # 「全部」：固定项，不允许拖拽
+                btn.configure(cursor="hand2")
+            else:
+                if _rename_on:
+                    btn.configure(cursor="hand2")
+                    btn.bind("<Button-3>", lambda e, c=cat: self._cat_rightclick(e, c), add="+")
+                    # v3.0.1 绑定拖拽（短按切换分类，长按/拖移 拖拽排序）
+                    self._bind_cat_drag(btn, cat, idx)
+                else:
+                    # 更名开关关闭 → 锁定：cursor arrow、无右键、无拖拽
+                    btn.configure(cursor="arrow")
             self.cat_buttons[cat] = {"btn": btn}
         self._layout_cat_buttons()
         self._update_cat_buttons()
@@ -5445,6 +5535,156 @@ class QuickLaunchView(BaseView):
             if self._current_cat == cat_name:
                 self._current_cat = "全部"
             self._refresh()
+
+    def _bind_cat_drag(self, btn, cat_name, index):
+        """可拖拽分类按钮：短按切换分类，长按/拖移 拖拽排序（与导航栏交互一致）
+        - 更名开关关闭时 _rebuild_cat_buttons 不调用本方法（天然锁定）
+        - 「全部」不绑定（天然固定）"""
+        state = {
+            "pressed": False,
+            "dragging": False,
+            "start_x": 0,
+            "start_y": 0,
+            "cat": cat_name,
+            "press_time": 0,
+        }
+
+        def on_press(e):
+            state["pressed"] = True
+            state["dragging"] = False
+            state["start_x"] = e.x_root
+            state["start_y"] = e.y_root
+            import time
+            state["press_time"] = time.time()
+
+        def on_motion(e):
+            if not state["pressed"] or state["dragging"]:
+                if state["dragging"]:
+                    self._highlight_cat_drop(e.x_root, e.y_root)
+                return
+            dx = abs(e.x_root - state["start_x"])
+            dy = abs(e.y_root - state["start_y"])
+            if max(dx, dy) > 12:
+                state["dragging"] = True
+                try:
+                    btn.configure(fg_color=("#e5f0ff", "#1a3752"),
+                                  text_color=("#2d7bc7", "#6bb2ff"),
+                                  cursor="fleur")
+                except Exception:
+                    pass
+
+        def on_release(e):
+            if not state["pressed"]:
+                return
+            state["pressed"] = False
+            if state["dragging"]:
+                state["dragging"] = False
+                try:
+                    btn.configure(fg_color="transparent", cursor="hand2")
+                except Exception:
+                    pass
+                self._clear_cat_drop_highlight()
+                self._handle_cat_drop(state["cat"], e.x_root, e.y_root)
+            else:
+                import time
+                try:
+                    elapsed = time.time() - state["press_time"]
+                except Exception:
+                    elapsed = 0
+                if elapsed < 0.4:
+                    # 短按 → 切换分类（这里不再调用 command，防止重复触发，使用显式 _filter_category）
+                    self._filter_category(state["cat"])
+
+        # 禁用 button 自带的 command（避免按下即触发；短按在 on_release 里判断）
+        try:
+            btn.configure(command=None)
+        except Exception:
+            pass
+        widgets = [btn]
+        if hasattr(btn, "_canvas"):
+            widgets.append(btn._canvas)
+        if hasattr(btn, "_text_label"):
+            widgets.append(btn._text_label)
+        for w in widgets:
+            w.bind("<Button-1>", on_press, add="+")
+            w.bind("<B1-Motion>", on_motion, add="+")
+            w.bind("<ButtonRelease-1>", on_release, add="+")
+
+    def _highlight_cat_drop(self, x_root, y_root):
+        """分类拖拽时高亮目标位置（离鼠标最近的非全部/非源分类）"""
+        for cat, info in self.cat_buttons.items():
+            btn = info.get("btn")
+            if not btn or cat == "全部":
+                continue
+            try:
+                bx = btn.winfo_rootx()
+                by = btn.winfo_rooty()
+                bw = btn.winfo_width()
+                bh = btn.winfo_height()
+                cx = bx + bw / 2
+                cy = by + bh / 2
+                # 距离判断：以按钮中心点为目标
+                dist = ((x_root - cx)**2 + (y_root - cy)**2) ** 0.5
+                if dist < max(bw, bh) * 0.9:
+                    btn.configure(text_color=("#2d7bc7", "#6bb2ff"),
+                                  font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"))
+                else:
+                    btn.configure(text_color=("gray30", "gray82"),
+                                  font=ctk.CTkFont(family="微软雅黑", size=12))
+            except Exception:
+                continue
+
+    def _clear_cat_drop_highlight(self):
+        for cat, info in self.cat_buttons.items():
+            btn = info.get("btn")
+            if not btn:
+                continue
+            try:
+                btn.configure(text_color=("gray30", "gray82"),
+                              font=ctk.CTkFont(family="微软雅黑", size=12))
+            except Exception:
+                continue
+
+    def _handle_cat_drop(self, source_cat, x_root, y_root):
+        """分类拖拽放落：找到离鼠标最近的目标分类，交换两者顺序"""
+        if not source_cat or source_cat == "全部":
+            self._update_cat_buttons()
+            return
+        # 找离鼠标最近的非「全部」且非源分类
+        target_cat = None
+        best_dist = float("inf")
+        for cat, info in self.cat_buttons.items():
+            btn = info.get("btn")
+            if not btn or cat == "全部" or cat == source_cat:
+                continue
+            try:
+                bx = btn.winfo_rootx()
+                by = btn.winfo_rooty()
+                bw = btn.winfo_width()
+                bh = btn.winfo_height()
+                cx = bx + bw / 2
+                cy = by + bh / 2
+                dist = ((x_root - cx)**2 + (y_root - cy)**2) ** 0.5
+                if dist < best_dist:
+                    best_dist = dist
+                    target_cat = cat
+            except Exception:
+                continue
+        if not target_cat or target_cat == source_cat:
+            self._update_cat_buttons()
+            return
+        # 交换顺序并写入配置
+        self.config.swap_cat_order(source_cat, target_cat)
+        # 记住当前分类（重建后恢复）
+        _old_current = self._current_cat
+        # 重建
+        self._rebuild_cat_buttons()
+        # 恢复当前选中
+        all_cats_after = ["全部"] + self.config.get_shortcut_categories()
+        if _old_current in all_cats_after:
+            self._current_cat = _old_current
+            self._update_cat_buttons()
+            self._build_grid(force=True)
 
     def _show_category_manager(self):
         """分类管理弹窗"""
