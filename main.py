@@ -22,8 +22,8 @@ from pathlib import Path
 # 应用常量
 # ============================================================
 APP_NAME = "知行工作台"
-APP_VERSION = "3.0.0"
-APP_SLOGAN = "致 虚 极 守 静 笃"
+APP_VERSION = "3.0.1"
+APP_SLOGAN = "致 虚 极 / 守 静 笃"
 APP_DESC = "一个简约、可扩展的个人桌面工作台"
 COPYRIGHT_OWNER = "知行工作室"
 COPYRIGHT_SITE  = "w3b.pub"
@@ -773,6 +773,38 @@ class ConfigManager:
         """设置是否允许导航栏拖拽排序"""
         self._write_settings({"nav_drag_enabled": bool(enabled)})
 
+    # ============================================================
+    # v3.0.1 快捷启动：分类记忆 + 重命名开关
+    # ============================================================
+    def get_last_view_category(self) -> str:
+        """获取上次用户停留的分类选项卡（跨会话记忆，默认「全部」）"""
+        try:
+            s = self._read_settings()
+            return str(s.get("last_view_category", "全部"))
+        except Exception:
+            return "全部"
+
+    def set_last_view_category(self, cat: str):
+        """切换分类时记住 — 下次启动直接回到这个分类"""
+        try:
+            self._write_settings({"last_view_category": str(cat)})
+        except Exception:
+            pass
+
+    def get_category_rename_enabled(self) -> bool:
+        """分类是否允许右键重命名/删除（总开关）"""
+        try:
+            s = self._read_settings()
+            return bool(s.get("category_rename_enabled", True))
+        except Exception:
+            return True
+
+    def set_category_rename_enabled(self, enabled: bool):
+        try:
+            self._write_settings({"category_rename_enabled": bool(enabled)})
+        except Exception:
+            pass
+
     def get_auto_dock_enabled(self):
         """窗口是否启用靠边自动收纳（类似 QQ），默认关"""
         return self._read_settings().get("auto_dock_enabled", False)
@@ -834,6 +866,10 @@ class ConfigManager:
             "integrity_hmac": "",    # 篡改检测校验值
             "version": APP_VERSION,
             "created_at": datetime.now().isoformat(),
+            # v3.0.1 全局持久化：上次停留在哪个快捷启动分类
+            "last_view_category": "全部",
+            # v3.0.1 分类重命名/删除 总开关（设置-导航设置里可切换）
+            "category_rename_enabled": True,
         }
 
     @staticmethod
@@ -3146,9 +3182,25 @@ class SettingsView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._toggle_nav_drag,
         )
-        self.nav_drag_switch.pack(anchor="w", padx=20, pady=(0, 20))
+        self.nav_drag_switch.pack(anchor="w", padx=20, pady=(0, 8))
         if self.config.get_nav_drag_enabled():
             self.nav_drag_switch.select()
+
+        # v3.0.1 分类重命名/删除总开关
+        ctk.CTkLabel(
+            nav_section, text="  分类更名",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            text_color="gray60",
+        ).pack(anchor="w", padx=20, pady=(10, 8))
+        self.cat_rename_switch = ctk.CTkSwitch(
+            nav_section,
+            text="允许分类右键重命名和删除（关闭可防止误操作）",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            command=self._toggle_cat_rename,
+        )
+        self.cat_rename_switch.pack(anchor="w", padx=20, pady=(0, 20))
+        if self.config.get_category_rename_enabled():
+            self.cat_rename_switch.select()
 
         # === 方法：自动锁屏 ===
     def _change_auto_lock(self, choice):
@@ -3210,13 +3262,14 @@ class SettingsView(BaseView):
         btn_row = ctk.CTkFrame(data_section, fg_color="transparent")
         btn_row.pack(fill="x", padx=20, pady=(0, 10))
 
-        ctk.CTkButton(
+        self._change_data_btn = ctk.CTkButton(
             btn_row, text="更改位置", height=34, width=110,
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._change_data_dir,
-        ).pack(side="left", padx=(0, 10))
+        )
+        self._change_data_btn.pack(side="left", padx=(0, 10))
 
-        ctk.CTkButton(
+        self._reset_data_btn = ctk.CTkButton(
             btn_row, text="恢复默认位置", height=34, width=120,
             fg_color=("gray70", "gray20"),
             border_width=2,
@@ -3225,7 +3278,37 @@ class SettingsView(BaseView):
             hover_color=("gray60", "gray30"),
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._reset_data_dir,
-        ).pack(side="left")
+        )
+        self._reset_data_btn.pack(side="left")
+
+        # v3.0.1 便携（绿色）版零留痕设计：数据固定在 EXE 同级 data/，不可更改
+        _is_portable = False
+        try:
+            import sys as _sys, os as _os
+            if getattr(_sys, "frozen", False):
+                _base = Path(_sys.executable).parent
+                _p = _base / "data"
+                _test = _p / ".portable_write_test"
+                try:
+                    _p.mkdir(parents=True, exist_ok=True)
+                    _test.write_text("1", encoding="utf-8")
+                    _test.unlink(missing_ok=True)
+                    _is_portable = True
+                except Exception:
+                    _is_portable = False
+        except Exception:
+            _is_portable = False
+        if _is_portable:
+            from customtkinter import DISABLED as _DSB
+            self._change_data_btn.configure(state=_DSB, fg_color=("gray80", "gray28"),
+                                            text_color=("gray55", "gray65"), hover=False)
+            self._reset_data_btn.configure(state=_DSB, text_color=("gray55", "gray65"), hover=False)
+            ctk.CTkLabel(
+                data_section,
+                text="  * 便携（绿色）版零留痕设计：数据固定在 EXE 同级 data/，不可更改",
+                font=ctk.CTkFont(family="微软雅黑", size=11),
+                text_color="#d68910",
+            ).pack(anchor="w", padx=20, pady=(0, 5))
 
         # 迁移结果提示
         self.data_dir_msg = ctk.CTkLabel(
@@ -3325,6 +3408,11 @@ class SettingsView(BaseView):
         main_win = self.winfo_toplevel()
         if hasattr(main_win, "_rebuild_nav_buttons"):
             main_win._rebuild_nav_buttons()
+
+    def _toggle_cat_rename(self):
+        """v3.0.1 切换分类重命名/删除总开关"""
+        enabled = self.cat_rename_switch.get() == 1
+        self.config.set_category_rename_enabled(enabled)
 
     def _refresh_overlay_scrollbars(self):
         """主题切换后刷新所有 OverlayScrollbar 的颜色和背景"""
@@ -4332,7 +4420,14 @@ class QuickLaunchView(BaseView):
         ).pack(side="right")
 
         self.cat_buttons = {}
-        self._current_cat = "全部"
+        # v3.0.1 跨会话恢复上次选中的分类（不在分类列表则兜底为「全部」）
+        persisted = None
+        try:
+            persisted = self.config.get_last_view_category()
+        except Exception:
+            persisted = None
+        all_cats_here = ["全部"] + self.config.get_shortcut_categories()
+        self._current_cat = persisted if (persisted and persisted in all_cats_here) else "全部"
 
         self._rebuild_cat_buttons()
 
@@ -5111,6 +5206,11 @@ class QuickLaunchView(BaseView):
 
     def _filter_category(self, cat: str):
         self._current_cat = cat
+        # v3.0.1 跨会话记住用户停留在哪个分类选项卡
+        try:
+            self.config.set_last_view_category(cat)
+        except Exception:
+            pass
         self._update_cat_buttons()
         self._build_grid(force=True)
 
@@ -5267,9 +5367,20 @@ class QuickLaunchView(BaseView):
 
     def _cat_rightclick(self, event, cat):
         """分类标签右键菜单"""
+        _ren_on = True
+        try:
+            _ren_on = self.config.get_category_rename_enabled()
+        except Exception:
+            pass
         menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="重命名", command=lambda: self._rename_category(cat))
-        menu.add_command(label="删除", command=lambda: self._delete_category(cat))
+        if _ren_on:
+            menu.add_command(label="重命名", command=lambda: self._rename_category(cat))
+            menu.add_command(label="删除", command=lambda: self._delete_category(cat))
+        else:
+            menu.add_command(label="重命名（已关闭）", state="disabled")
+            menu.add_command(label="删除（已关闭）", state="disabled")
+            menu.add_separator()
+            menu.add_command(label="请到 设置 → 导航设置 开启", state="disabled")
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -5330,11 +5441,26 @@ class QuickLaunchView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=16, weight="bold"),
         ).pack(anchor="w", padx=20, pady=(20, 10))
 
-        ctk.CTkLabel(
-            dlg, text="右键分类标签可快速重命名或删除",
-            font=ctk.CTkFont(family="微软雅黑", size=11),
-            text_color="gray50",
-        ).pack(anchor="w", padx=20, pady=(0, 10))
+        # v3.0.1 分类重命名/删除总开关
+        _ren_on = True
+        try:
+            _ren_on = self.config.get_category_rename_enabled()
+        except Exception:
+            pass
+        _disabled_fg = ("gray65", "gray55")
+
+        if _ren_on:
+            ctk.CTkLabel(
+                dlg, text="右键分类标签可快速重命名或删除",
+                font=ctk.CTkFont(family="微软雅黑", size=11),
+                text_color="gray50",
+            ).pack(anchor="w", padx=20, pady=(0, 10))
+        else:
+            ctk.CTkLabel(
+                dlg, text="分类更名/删除已关闭（请到 设置 → 导航设置 开启）",
+                font=ctk.CTkFont(family="微软雅黑", size=11),
+                text_color="#d68910",
+            ).pack(anchor="w", padx=20, pady=(0, 10))
 
         scroll_area = ctk.CTkScrollableFrame(
             dlg, fg_color="transparent", label_text="",
@@ -5375,9 +5501,13 @@ class QuickLaunchView(BaseView):
                 font=ctk.CTkFont(family="微软雅黑", size=13),
             ).pack(side="left", padx=15, pady=8)
 
+            _btn_state = "normal" if _ren_on else "disabled"
             ctk.CTkButton(
                 row, text="重命名", width=60, height=28,
                 font=ctk.CTkFont(family="微软雅黑", size=12),
+                state=_btn_state,
+                text_color=_disabled_fg if not _ren_on else None,
+                fg_color=("gray80", "gray28") if not _ren_on else None,
                 command=lambda c=cat: self._rename_category_from_manager(c, dlg, scroll_area),
             ).pack(side="right", padx=(5, 10), pady=5)
 
@@ -5385,8 +5515,9 @@ class QuickLaunchView(BaseView):
                 row, text="删除", width=50, height=28,
                 fg_color="transparent",
                 hover_color=("#e08080", "#b05555"),
-                text_color=("#e74c3c", "#e74c3c"),
+                text_color=_disabled_fg if not _ren_on else ("#e74c3c", "#e74c3c"),
                 font=ctk.CTkFont(family="微软雅黑", size=12),
+                state=_btn_state,
                 command=lambda c=cat: self._delete_category_from_manager(c, dlg, scroll_area),
             ).pack(side="right", pady=5)
 
