@@ -22,7 +22,7 @@ from pathlib import Path
 # 应用常量
 # ============================================================
 APP_NAME = "知行工作台"
-APP_VERSION = "3.0.2"
+APP_VERSION = "3.1"
 APP_SLOGAN = "致 虚 极 / 守 静 笃"
 APP_DESC = "一个简约、可扩展的个人桌面工作台"
 COPYRIGHT_OWNER = "知行工作室"
@@ -872,6 +872,8 @@ class ConfigManager:
             "category_rename_enabled": True,
             # v3.0.1 分类自定义顺序（不含「全部」）
             "category_order": [],
+            # v3.1 窗口几何持久化："WxH+X+Y" 格式
+            "window_geometry": "",
         }
 
     @staticmethod
@@ -1383,6 +1385,21 @@ class ConfigManager:
         """设置导航项排序"""
         self.config["nav_order"] = order_list
         self.save()
+
+    def get_window_geometry(self) -> str:
+        """v3.1 读取上次关闭前的窗口大小与位置，返回 "WxH+X+Y"；空字符串表示未记录"""
+        try:
+            return str(self.config.get("window_geometry", "") or "")
+        except Exception:
+            return ""
+
+    def set_window_geometry(self, w: int, h: int, x: int, y: int):
+        """v3.1 记录当前窗口大小与位置"""
+        try:
+            self.config["window_geometry"] = f"{int(w)}x{int(h)}+{int(x)}+{int(y)}"
+            self.save()
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -6692,8 +6709,29 @@ class WorkbenchApp(ctk.CTk):
         self.title(f"{APP_NAME} - v{APP_VERSION}")
         self.minsize(1100, 840)      # 最小尺寸：完整展示首页+待办输入框+番茄钟说明+应用功能卡片
         self.maxsize(1600, 1000)    # v2.3.19 最大尺寸限制，避免设置界面被拉得过大
-        self.geometry("1200x860")    # 初始大小：Win11 风格，1080p 居中展示全部内容
         self.configure(fg_color=("gray93", "gray10"))
+        # v3.1 恢复上次窗口大小与位置（带有效性校验：尺寸在 [minsize,maxsize] 内，XY 落在屏幕可见区）
+        MIN_W, MIN_H, MAX_W, MAX_H = 1100, 840, 1600, 1000
+        _geom_used = False
+        try:
+            _geom = self.config.get_window_geometry()
+            if _geom and "x" in _geom and "+" in _geom:
+                import re as _re
+                _m = _re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", _geom)
+                if _m:
+                    W, H, X, Y = int(_m.group(1)), int(_m.group(2)), int(_m.group(3)), int(_m.group(4))
+                    if MIN_W <= W <= MAX_W and MIN_H <= H <= MAX_H:
+                        sw = self.winfo_screenwidth()
+                        sh = self.winfo_screenheight()
+                        # XY 合理性：窗口左上角必须在屏幕内，且至少 100×100 可见
+                        if -W + 100 <= X <= sw - 100 and -H + 100 <= Y <= sh - 100:
+                            self.geometry(f"{W}x{H}+{X}+{Y}")
+                            _geom_used = True
+        except Exception:
+            _geom_used = False
+        if not _geom_used:
+            self.geometry("1200x860")    # 兜底：Win11 风格，1080p 居中展示全部内容
+            center_window(self, 1200, 860)
         # 在 withdraw 前设置图标，确保首次 deiconify 时任务栏图标正确
         set_window_icon(self)
         # v2.5.8+：窗口级 AppID — 让 Shell/Taskbar 把主窗口识别为知行工作台 App
@@ -7873,6 +7911,26 @@ class TrayManager:
         try:
             if hasattr(app, "config") and app.config is not None:
                 app.config.flush()
+        except Exception:
+            pass
+        # v3.1 退出前保存窗口大小与位置（仅正常展开态，排除停靠/最小化/隐藏态）
+        try:
+            if app is not None and app.winfo_exists():
+                # 只保存可见且正常展开的状态：withdrawn/iconified 直接跳过
+                _state = app.state()
+                if _state in ("normal", "zoomed"):
+                    try:
+                        W = app.winfo_width()
+                        H = app.winfo_height()
+                        X = app.winfo_x()
+                        Y = app.winfo_y()
+                        # 排除停靠态（宽度只有 PEEK_PX 约 6~14px）或尺寸不足 minsize
+                        if W >= 1100 and H >= 840:
+                            app.config.set_window_geometry(W, H, X, Y)
+                            # 立即落盘，避免 destroy 时后台线程丢数据
+                            app.config.flush()
+                    except Exception:
+                        pass
         except Exception:
             pass
         try:
