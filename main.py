@@ -3186,15 +3186,15 @@ class SettingsView(BaseView):
         if self.config.get_nav_drag_enabled():
             self.nav_drag_switch.select()
 
-        # v3.0.1 分类重命名/删除总开关
+        # v3.0.1 更名总开关（控制：卡片双击重命名、卡片右键重命名、分类右键重命名/删除、分类管理弹窗、导航项重命名）
         ctk.CTkLabel(
-            nav_section, text="  分类更名",
+            nav_section, text="  更名设置",
             font=ctk.CTkFont(family="微软雅黑", size=13),
             text_color="gray60",
         ).pack(anchor="w", padx=20, pady=(10, 8))
         self.cat_rename_switch = ctk.CTkSwitch(
             nav_section,
-            text="允许分类右键重命名和删除（关闭可防止误操作）",
+            text="允许重命名操作（关闭后卡片双击/右键、分类、导航项更名均禁用）",
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._toggle_cat_rename,
         )
@@ -4329,8 +4329,12 @@ class QuickLaunchView(BaseView):
     }
 
     def _build(self):
-        # 视图大小
-        self._view_size = "medium"
+        # v3.0.1 记住上次视图大小
+        try:
+            _saved_size = self.config._read_settings().get("last_view_size", "medium")
+        except Exception:
+            _saved_size = "medium"
+        self._view_size = _saved_size if _saved_size in ("small", "medium", "large") else "medium"
 
         # 顶部标题栏
         top = ctk.CTkFrame(self, fg_color="transparent")
@@ -4368,7 +4372,9 @@ class QuickLaunchView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=11),
             command=self._toggle_view_size,
         )
-        self.size_seg.set("中")
+        # v3.0.1 恢复上次视图大小选择
+        _size_label_map = {"small": "小", "medium": "中", "large": "大"}
+        self.size_seg.set(_size_label_map.get(self._view_size, "中"))
         self.size_seg.pack(side="left")
 
         # 排序按钮（弹出排序菜单）
@@ -4820,6 +4826,11 @@ class QuickLaunchView(BaseView):
         """切换视图大小"""
         size_map = {"小": "small", "中": "medium", "大": "large"}
         self._view_size = size_map.get(choice, "medium")
+        # v3.0.1 持久化视图大小
+        try:
+            self.config._write_settings({"last_view_size": self._view_size})
+        except Exception:
+            pass
         self._build_grid(force=True)
 
     # ---------------------- 批量图标操作 ----------------------
@@ -4976,6 +4987,14 @@ class QuickLaunchView(BaseView):
 
     def _on_card_double(self, sc: dict):
         """双击：快速重命名"""
+        # v3.0.1 更名总开关关闭时拦截
+        try:
+            if not self.config.get_category_rename_enabled():
+                from tkinter import messagebox as _mb
+                _mb.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。", parent=self)
+                return
+        except Exception:
+            pass
         new_name = show_input_dialog(
             self, "重命名", "输入新的名称：", initialvalue=sc["name"]
         )
@@ -5103,9 +5122,18 @@ class QuickLaunchView(BaseView):
 
     def _on_card_rightclick(self, event, sc: dict):
         """右键：菜单"""
+        # v3.0.1 更名总开关
+        _ren_on = True
+        try:
+            _ren_on = self.config.get_category_rename_enabled()
+        except Exception:
+            pass
         menu = tk.Menu(self, tearoff=0)
         menu.add_command(label="打开", command=lambda: self._on_card_click(sc))
-        menu.add_command(label="重命名", command=lambda: self._on_card_double(sc))
+        if _ren_on:
+            menu.add_command(label="重命名", command=lambda: self._on_card_double(sc))
+        else:
+            menu.add_command(label="重命名（已关闭）", state="disabled")
         menu.add_command(label="编辑详情", command=lambda: self._show_edit_dialog(sc))
         menu.add_separator()
         is_pinned = sc.get("pinned", False)
@@ -5380,7 +5408,7 @@ class QuickLaunchView(BaseView):
             menu.add_command(label="重命名（已关闭）", state="disabled")
             menu.add_command(label="删除（已关闭）", state="disabled")
             menu.add_separator()
-            menu.add_command(label="请到 设置 → 导航设置 开启", state="disabled")
+            menu.add_command(label="请到 设置 → 导航设置 → 更名设置 开启", state="disabled")
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -5457,7 +5485,7 @@ class QuickLaunchView(BaseView):
             ).pack(anchor="w", padx=20, pady=(0, 10))
         else:
             ctk.CTkLabel(
-                dlg, text="分类更名/删除已关闭（请到 设置 → 导航设置 开启）",
+                dlg, text="更名已关闭（请到 设置 → 导航设置 → 更名设置 开启）",
                 font=ctk.CTkFont(family="微软雅黑", size=11),
                 text_color="#d68910",
             ).pack(anchor="w", padx=20, pady=(0, 10))
@@ -5468,7 +5496,7 @@ class QuickLaunchView(BaseView):
         scroll_area.pack(fill="both", expand=True, padx=20, pady=(0, 10))
         self.after(100, lambda: apply_card_scrollbar(scroll_area))
 
-        self._populate_cat_manager(scroll_area, dlg)
+        self._populate_cat_manager(scroll_area, dlg, _ren_on, _disabled_fg)
 
         ctk.CTkButton(
             dlg, text="关闭", width=100, height=36,
@@ -5476,7 +5504,7 @@ class QuickLaunchView(BaseView):
             command=lambda: (dlg.destroy(), self._refresh()),
         ).pack(pady=(0, 15))
 
-    def _populate_cat_manager(self, scroll_area, dlg):
+    def _populate_cat_manager(self, scroll_area, dlg, _ren_on=True, _disabled_fg=("gray65", "gray55")):
         """填充分类管理列表"""
         for w in scroll_area.winfo_children():
             w.destroy()
@@ -5592,9 +5620,15 @@ class QuickLaunchView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=13, weight="bold"),
         ).pack(anchor="w", padx=25, pady=(15, 5))
 
-        type_var = ctk.StringVar(
-            value=shortcut["type"] if shortcut else "app"
-        )
+        # v3.0.1 记住上次新增项目时选择的类型
+        if shortcut:
+            _init_type = shortcut["type"]
+        else:
+            try:
+                _init_type = self.config._read_settings().get("last_shortcut_type", "app")
+            except Exception:
+                _init_type = "app"
+        type_var = ctk.StringVar(value=_init_type)
         type_frame = ctk.CTkFrame(dlg, fg_color="transparent")
         type_frame.pack(fill="x", padx=25, pady=(0, 8))
 
@@ -5840,10 +5874,10 @@ class QuickLaunchView(BaseView):
             path_val = path_entry.get().strip()
             stype = type_var.get()
             cat = cat_entry.get().strip() or "默认"
-            # 记住上次使用的分类
+            # 记住上次使用的分类和类型
             if mode == "add":
                 try:
-                    self.config._write_settings({"last_shortcut_category": cat})
+                    self.config._write_settings({"last_shortcut_category": cat, "last_shortcut_type": stype})
                 except Exception:
                     pass
 
@@ -6617,13 +6651,24 @@ class WorkbenchApp(ctk.CTk):
 
     def _show_nav_menu(self, event, original_label, btn):
         """导航按钮右键菜单"""
+        _ren_on = True
+        try:
+            _ren_on = self.config.get_category_rename_enabled()
+        except Exception:
+            pass
         menu = tk.Menu(self, tearoff=0)
         current = self.config.get_nav_labels().get(original_label, original_label)
-        menu.add_command(label=f"重命名「{current}」", command=lambda: self._rename_nav(original_label))
+        if _ren_on:
+            menu.add_command(label=f"重命名「{current}」", command=lambda: self._rename_nav(original_label))
+        else:
+            menu.add_command(label=f"重命名「{current}」（已关闭）", state="disabled")
         if original_label in self.config.get_nav_labels():
             menu.add_command(label="恢复默认名称", command=lambda: self._reset_nav_name(original_label))
         menu.add_separator()
-        menu.add_command(label="提示：双击也可重命名", state="disabled")
+        if _ren_on:
+            menu.add_command(label="提示：双击也可重命名", state="disabled")
+        else:
+            menu.add_command(label="更名已关闭（设置 → 导航设置 → 更名设置）", state="disabled")
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -6639,6 +6684,14 @@ class WorkbenchApp(ctk.CTk):
         # 非当前页面：不处理，让延迟切换继续
         if original_label != self._active_original_label:
             return
+        # v3.0.1 更名总开关关闭时拦截
+        try:
+            if not self.config.get_category_rename_enabled():
+                from tkinter import messagebox as _mb
+                _mb.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。")
+                return
+        except Exception:
+            pass
         # 取消延迟切换
         if self._nav_click_timer:
             self.after_cancel(self._nav_click_timer)
