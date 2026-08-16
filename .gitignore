@@ -1,0 +1,46 @@
+﻿# ===== 知行工作台 v3.0 .gitignore =====
+
+# Python 编译产物
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# PyInstaller 构建
+build/
+dist/
+*.spec.bak
+*.manifest
+*.log
+
+# ===== 用户个人数据（绝对不能进仓库）=====
+data/
+*.db
+*.sqlite
+*.sqlite3
+.vault/
+.secrets
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+
+# IDE / OS 产物
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 本地环境变量 / 密钥
+.env
+.env.local
+*.local
+
+# 临时备份文件（不进仓库）
+*.bak
+*.bak*
+*.bak_*
+*.backup_*
