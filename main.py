@@ -22,7 +22,7 @@ from pathlib import Path
 # 应用常量
 # ============================================================
 APP_NAME = "知行工作台"
-APP_VERSION = "3.1"
+APP_VERSION = "3.1.0"
 APP_SLOGAN = "致 虚 极 / 守 静 笃"
 APP_DESC = "一个简约、可扩展的个人桌面工作台"
 COPYRIGHT_OWNER = "知行工作室"
