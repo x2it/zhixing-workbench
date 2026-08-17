@@ -1,0 +1,187 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>知行工作台 - 隐私政策</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+    color: #1f2937;
+    background: #f9fafb;
+    margin: 0;
+    padding: 40px 20px;
+  }
+  .container {
+    max-width: 820px;
+    margin: 0 auto;
+    background: #ffffff;
+    border-radius: 12px;
+    padding: 48px 56px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+  }
+  h1 {
+    font-size: 28px;
+    color: #111827;
+    margin: 0 0 8px;
+    border-bottom: 2px solid #3b82f6;
+    padding-bottom: 12px;
+  }
+  .subtitle {
+    color: #6b7280;
+    font-size: 14px;
+    margin: 0 0 32px;
+  }
+  h2 {
+    font-size: 20px;
+    color: #1f2937;
+    margin: 32px 0 12px;
+    padding-left: 12px;
+    border-left: 4px solid #3b82f6;
+  }
+  p, li {
+    font-size: 15px;
+    color: #374151;
+  }
+  ul {
+    padding-left: 24px;
+  }
+  li {
+    margin: 6px 0;
+  }
+  .highlight {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+  .highlight strong {
+    color: #1d4ed8;
+  }
+  code {
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 13px;
+    color: #be123c;
+  }
+  .footer {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+    color: #9ca3af;
+    font-size: 13px;
+    text-align: center;
+  }
+  .badge {
+    display: inline-block;
+    background: #dcfce7;
+    color: #166534;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <h1>知行工作台 隐私政策</h1>
+  <p class="subtitle">生效日期:2026 年 8 月 17 日 · 版本:v3.1.0</p>
+
+  <div class="highlight">
+    <span class="badge">100% 离线</span><br>
+    <strong>知行工作台 是一款完全离线的桌面应用,不联网、不上传、不收集任何用户数据。</strong>
+    本应用不包含任何网络请求代码,不与任何服务器通信,所有数据均存储在您本地的计算机上。
+  </div>
+
+  <h2>1. 数据收集</h2>
+  <p>知行工作台 <strong>不收集</strong> 任何个人信息,包括但不限于:</p>
+  <ul>
+    <li>不收集姓名、邮箱、电话、地址等身份信息</li>
+    <li>不收集设备标识符、硬件指纹、IP 地址</li>
+    <li>不收集位置信息</li>
+    <li>不收集使用行为数据、崩溃日志、遥测数据</li>
+    <li>不进行任何网络通信,不存在数据上传</li>
+  </ul>
+
+  <h2>2. 本地数据存储</h2>
+  <p>您在使用本应用过程中产生的所有数据,均以加密形式存储在本地计算机:</p>
+  <ul>
+    <li><strong>安装版路径</strong>:<code>%USERPROFILE%\.zhixing_workbench\</code></li>
+    <li><strong>便携版路径</strong>:程序同级 <code>data\</code> 文件夹</li>
+  </ul>
+  <p>数据范围包括:待办事项、笔记内容、快捷启动配置、应用设置。</p>
+
+  <h2>3. 数据加密</h2>
+  <p>所有敏感数据在写入磁盘前均经过加密处理:</p>
+  <ul>
+    <li><strong>密钥派生</strong>:PBKDF2-HMAC-SHA256,100,000 次迭代</li>
+    <li><strong>加密算法</strong>:AES 流式加密(SHA-256 计数器模式密钥流)</li>
+    <li><strong>密码存储</strong>:仅存储加盐密码哈希,不存储明文密码</li>
+    <li><strong>盐值</strong>:每次加密使用随机盐,防止彩虹表攻击</li>
+  </ul>
+  <p>加密密钥由您设置的登录密码派生,<strong>微软、开发者及任何第三方均无法解密您的数据</strong>。请妥善保管您的密码,密码丢失后数据将无法恢复。</p>
+
+  <h2>4. 第三方服务</h2>
+  <p>知行工作台 <strong>不使用</strong> 任何第三方服务,包括:</p>
+  <ul>
+    <li>不集成任何分析 SDK(无 Google Analytics、无友盟、无 Flurry 等)</li>
+    <li>不集成任何广告 SDK</li>
+    <li>不集成任何云服务、推送服务、登录服务</li>
+    <li>不包含任何生成式 AI 功能</li>
+    <li>不调用任何远程 API</li>
+  </ul>
+
+  <h2>5. 权限说明</h2>
+  <p>本应用以普通用户权限运行,仅访问以下系统资源:</p>
+  <ul>
+    <li><strong>文件系统</strong>:读写上述本地数据目录(用于存储用户数据)</li>
+    <li><strong>注册表</strong>:仅在安装/卸载时写入卸载信息(HKLM Uninstall 键)</li>
+    <li><strong>系统托盘</strong>:用于最小化到托盘功能</li>
+    <li><strong>快捷方式</strong>:在桌面和开始菜单创建应用快捷方式</li>
+  </ul>
+  <p>本应用 <strong>不申请</strong> 以下权限:网络访问、摄像头、麦克风、位置、联系人、短信、电话等。</p>
+
+  <h2>6. 儿童隐私</h2>
+  <p>本应用不针对 13 岁以下儿童,也不会有意收集儿童个人信息。由于本应用完全不收集任何数据,因此适用于所有年龄段用户。</p>
+
+  <h2>7. 数据删除</h2>
+  <p>您可以随时通过以下方式彻底删除所有数据:</p>
+  <ul>
+    <li><strong>卸载应用</strong>:通过「控制面板 → 程序和功能」卸载(卸载不会删除用户数据)</li>
+    <li><strong>手动删除数据目录</strong>:删除 <code>%USERPROFILE%\.zhixing_workbench\</code> 或便携版 <code>data\</code> 文件夹</li>
+  </ul>
+  <p>删除数据目录后,所有待办、笔记、配置将永久丢失且无法恢复。</p>
+
+  <h2>8. 开源代码</h2>
+  <p>知行工作台是完全开源的项目,任何人都可以审查源代码以验证本隐私政策的真实性:</p>
+  <ul>
+    <li><strong>源代码仓库</strong>:https://github.com/x2it/zhixing-workbench</li>
+    <li><strong>开源协议</strong>:MIT License</li>
+  </ul>
+  <p>您可以通过审查源代码确认:本应用不存在任何网络请求、数据上传或外部通信代码。</p>
+
+  <h2>9. 隐私政策变更</h2>
+  <p>若本隐私政策发生变更,更新后的政策将通过本页面公布,并更新页面顶部的「生效日期」。由于本应用不联网,不会通过应用内通知推送政策变更。</p>
+
+  <h2>10. 联系方式</h2>
+  <p>如果您对本隐私政策有任何疑问,可通过以下方式联系:</p>
+  <ul>
+    <li><strong>项目主页</strong>:https://github.com/x2it/zhixing-workbench</li>
+    <li><strong>问题反馈</strong>:https://github.com/x2it/zhixing-workbench/issues</li>
+  </ul>
+
+  <div class="footer">
+    © 2026 知行工作室 · MIT License · 本页面由 GitHub Pages 托管
+  </div>
+
+</div>
+</body>
+</html>
