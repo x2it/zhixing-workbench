@@ -5,6 +5,35 @@
 
 ---
 
+## [3.2.0] - 2026-08-18
+
+### 新增
+- **快捷启动拖拽导入（文件→卡片）**：支持将 Windows 任意文件 / 快捷方式（.exe · .lnk · .url · .website · .doc · .docx · .xls · .xlsx · .ppt · .pptx · .pdf · .txt · .msc · .cpl · .bat · .cmd 等）直接拖到快捷启动卡片区域，自动按扩展名推断「软件 / 网址 / 系统命令 / 办公文档 / 管理工具」分类并填入路径、名称、图标
+  - 解析引擎：tkinterdnd2（TkDND tkdnd.dll）+ 递归注册 scroll/grid_frame 子控件为 DnD 接收端；对 {path1}{path2} 多文件包裹格式做清理
+  - 失败兜底：未识别的扩展名默认落在「软件」分类，保留原始路径让用户手动调整
+- **一键刷新全部图标**：快捷启动右上角新增「🔄 刷新图标」按钮（110×34 灰色圆角），点击二次确认后按项目类型重新提取图标（软件→ exe 资源、系统命令→ Shell32 识别、网址→ 抓取 favicon）；自定义上传的图标不会被覆盖
+- **文件日志系统（生产调试必备）**：不再依赖 print / 控制台输出。启动时在 %APPDATA%\\zhixing_workbench\\debug.log 追加写入日志：
+  - 启动横幅 === ZhixingWorkbench v3.2.0 started ===
+  - 关键诊断通道：[DnD]（tkdnd 版本、DLL 搜索链）、[Tray]（pystray 缺失、图标缺失）、[dock]（停靠轮询异常）、[Launch]（窗口位置越界 → 自动居中）
+  - 超过 500KB 自动删除旧日志，避免无限膨胀
+  - stderr 同步重定向到日志文件，未捕获异常也有迹可循
+
+### 变更
+- APP_VERSION：3.1 → 3.2.0（代码内常量 + version_info.txt + setup_installer.nsi 同步升至 3.2.0.0）
+- ZhixingWorkbench.spec：console=False 启用 runw.exe 启动器（不弹 CMD）；datas 增加 tkinterdnd2/tkdnd 目录保证拖拽 DLL 正确加载
+- DnD 初始化时序修复：从 WorkbenchApp.__init__ 的 after(500, _init_dnd) 改为在 Application._run_main 主窗口创建后立即同步调用 self.app._init_dnd()，解决打包环境下偶尔初始化失败导致「拖不动 / 禁止符号🚯」
+- README.md 全面同步 v3.2 功能清单与构建流程（MSIX / Setup / 绿色版三条路径）
+- 帮助手册.md 对应版本改为 v3.2.0，新增「拖拽导入」「刷新图标」「窗口显示修复」「文件日志」章节
+- setup_installer.nsi 版本号同步 3.2.0.0
+
+### 修复
+- **主窗口不显示（任务栏预览但打不开）**：
+  1. 启动时校验窗口 X/Y 是否落在所有显示器组合的可见矩形内，超出 → 强制 center_window 居中
+  2. 从托盘恢复时显式依次执行 deiconify → state(normal) → attributes(-alpha 1.0) → lift → focus_force，解决 withdrawn / 透明度 0 / 最小化 三态残留叠加后的「隐身窗口」
+- 拖拽时禁止符号🚯（拖不动）：确认 Tk 被 TkinterDnD monkey-patch + onedir 包含 tkdnd DLL + 注册端落到实际承载的 scroll/grid_frame
+- 运行时弹出 CMD 黑窗：通过 console=False + 文件日志彻底消除对控制台子系统的依赖
+
+---
 ## [3.1.0] - 2026-08-17
 
 ### 新增

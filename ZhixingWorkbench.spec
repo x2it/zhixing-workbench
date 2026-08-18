@@ -1,16 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
-# 知行工作台 v3.0 PyInstaller 配置（onedir 便捷版 + 安装版 Setup 共用）
-# 使用方式：pyinstaller --clean --noconfirm ZhixingWorkbench.spec
+# 知行工作台 v3.2 PyInstaller 配置（onedir + tkinterdnd2 拖拽支持）
 
 block_cipher = None
 
-a = Analysis(
+_a = Analysis(
     ["main.py"],
     pathex=[],
     binaries=[],
     datas=[
         ("app_icon.ico", "."),
         ("version_info.txt", "."),
+        (r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310\lib\site-packages\tkinterdnd2\tkdnd\win-x64", "tkdnd/win-x64"),
+        (r"C:\Users\Administrator\AppData\Local\Programs\Python\Python310\lib\site-packages\tkinterdnd2\tkdnd", "tkdnd"),
     ],
     hiddenimports=[
         "PIL._tkinter_finder",
@@ -21,6 +22,7 @@ a = Analysis(
         "customtkinter",
         "customtkinter.windows.widgets",
         "tkinter.ttk",
+        "tkinterdnd2",
     ],
     hookspath=[],
     hooksconfig={},
@@ -40,11 +42,11 @@ a = Analysis(
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(_a.pure, _a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
-    a.scripts,
+    _a.scripts,
     [],
     exclude_binaries=True,
     name="知行工作台",
@@ -64,9 +66,9 @@ exe = EXE(
 
 coll = COLLECT(
     exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
+    _a.binaries,
+    _a.zipfiles,
+    _a.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

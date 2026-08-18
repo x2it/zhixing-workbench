@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 知行工作台 - 个人桌面工作台应用
 Version: 2.5.7
@@ -18,11 +18,68 @@ import math
 from datetime import datetime
 from pathlib import Path
 
+# tkinterdnd2: 标准拖拽支持
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _HAS_DND = True
+except Exception as _e_dnd:
+    _HAS_DND = False
+    # 诊断：记录导入失败原因
+    try:
+        import datetime as _dt
+        _dl = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "zhixing_workbench", "debug.log")
+        with open(_dl, "a", encoding="utf-8") as _df:
+            _df.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] IMPORT tkinterdnd2 FAILED: {_e_dnd}\n")
+    except Exception:
+        pass
+
 # ============================================================
 # 应用常量
 # ============================================================
 APP_NAME = "知行工作台"
-APP_VERSION = "3.1.0"
+APP_VERSION = "3.2.0"
+
+# ===== v3.2 文件日志（生产环境也能看日志，不影响 tkinter） =====
+import datetime as _datetime
+try:
+    _log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "zhixing_workbench")
+    os.makedirs(_log_dir, exist_ok=True)
+    _log_path = os.path.join(_log_dir, "debug.log")
+    try:
+        if os.path.exists(_log_path) and os.path.getsize(_log_path) > 500 * 1024:
+            os.remove(_log_path)
+    except Exception:
+        pass
+
+    class _LogWriter:
+        def __init__(self, filepath):
+            self.fp = open(filepath, "a", encoding="utf-8")
+            self.encoding = "utf-8"
+        def write(self, msg):
+            try:
+                self.fp.write(msg)
+                self.fp.flush()
+            except Exception:
+                pass
+        def flush(self):
+            try:
+                self.fp.flush()
+            except Exception:
+                pass
+
+    _log_writer = _LogWriter(_log_path)
+    # 只重定向 stderr（stdout 留给 tkinter）
+    sys.stderr = _log_writer
+
+    def _log(msg):
+        ts = _datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        _log_writer.write(f"[{ts}] {msg}\n")
+        _log_writer.flush()
+
+    _log(f"=== ZhixingWorkbench v{APP_VERSION} started ===")
+except Exception:
+    _log_path = None
+    _log = print  # fallback to print if file logging fails
 APP_SLOGAN = "致 虚 极 / 守 静 笃"
 APP_DESC = "一个简约、可扩展的个人桌面工作台"
 COPYRIGHT_OWNER = "知行工作室"
@@ -1241,7 +1298,7 @@ class ConfigManager:
         }
 
     # --- 快捷启动 ---
-    def add_shortcut(self, name, stype, path, icon=None, category="默认"):
+    def add_shortcut(self, name, stype, path, icon=None, category="默认", custom_icon=False):
         sc = {
             "id": max([s["id"] for s in self.shortcuts], default=0) + 1,
             "name": name,
@@ -1250,6 +1307,7 @@ class ConfigManager:
             "icon": icon,         # base64 PNG 或 None
             "category": category,
             "sort": len(self.shortcuts),
+            "custom_icon": custom_icon,  # True=用户手动设置，刷新时跳过
         }
         self.shortcuts.append(sc)
         self.save()
@@ -4482,6 +4540,15 @@ class QuickLaunchView(BaseView):
             command=self._show_presets,
         ).pack(side="left", padx=(0, 12))
 
+        # 刷新图标按钮
+        ctk.CTkButton(
+            right_btns, text="🔄 刷新图标", width=110, height=34,
+            fg_color=("gray75", "gray26"),
+            hover_color=("gray60", "gray30"),
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            command=self._batch_refresh_icons,
+        ).pack(side="left", padx=(0, 12))
+
         # 添加按钮
         ctk.CTkButton(
             right_btns, text="+ 新增项目", width=110, height=34,
@@ -4544,6 +4611,9 @@ class QuickLaunchView(BaseView):
 
         self._grid_frame = None
         self._build_grid()
+
+        # 注册文件拖拽支持
+        self.after(200, self._register_drag_drop)
 
     def _cleanup_tooltips(self):
         """销毁所有残留的 tooltip 窗口"""
@@ -4966,6 +5036,7 @@ class QuickLaunchView(BaseView):
         IconExtractor._cache.clear()
 
         def worker():
+            skipped_custom = 0
             for idx, sc in enumerate(shortcuts, start=1):
                 if cancelled["v"] or not self.winfo_exists():
                     break
@@ -4973,6 +5044,11 @@ class QuickLaunchView(BaseView):
                 stype = sc.get("type", "app")
                 pval = sc.get("path", "")
                 name = sc.get("name", "")
+
+                # v3.2 跳过用户手动设置的图标
+                if sc.get("custom_icon", False):
+                    skipped_custom += 1
+                    continue
 
                 try:
                     if stype == "system":
@@ -5043,12 +5119,15 @@ class QuickLaunchView(BaseView):
             def _done():
                 if not self.winfo_exists():
                     return
+                skipped_line = f"  • 跳过自定义图标：{skipped_custom} 项\n" if skipped_custom else ""
                 msg = (
                     f"✅ 刷新完成！共 {total} 项：\n\n"
                     f"  • 成功提取真实图标：{succeeded['v']} 项\n"
                     f"  • 兜底（预设简笔画/Z）：{fallback['v']} 项\n"
-                    f"  • 异常：{errors['v']} 项\n\n"
-                    f"提取失败的（兜底）可以稍后在该卡片右键「重新提取图标」重试。"
+                    f"  • 异常：{errors['v']} 项\n"
+                    f"{skipped_line}"
+                    f"\n提取失败的（兜底）可以稍后在该卡片右键「重新提取图标」重试。\n"
+                    f"自定义图标不会被覆盖，如需刷新请先「重置为默认」。"
                 )
                 try:
                     self._refresh_status.configure(text=f"刷新完成！成功{succeeded['v']} / 兜底{fallback['v']}")
@@ -6019,15 +6098,57 @@ class QuickLaunchView(BaseView):
 
         def choose_custom_icon():
             filepath = filedialog.askopenfilename(
-                title="选择图标图片",
+                title="选择图标图片或 EXE 文件",
                 filetypes=[
-                    ("图片文件", "*.png *.ico *.jpg *.jpeg"),
+                    ("图片和程序", "*.png *.ico *.jpg *.jpeg *.exe *.dll *.lnk *.bmp *.gif"),
+                    ("图片文件", "*.png *.ico *.jpg *.jpeg *.bmp *.gif"),
+                    ("程序文件", "*.exe *.dll *.lnk"),
                     ("所有文件", "*.*"),
                 ],
                 parent=dlg,
             )
-            if filepath:
-                try:
+            if not filepath:
+                return
+            ext = os.path.splitext(filepath)[1].lower()
+            try:
+                if ext in (".exe", ".dll"):
+                    # 从 EXE/DLL 提取图标
+                    b64 = IconExtractor.extract_from_exe(filepath)
+                    if not b64 or b64 == IconExtractor._default_icon():
+                        messagebox.showwarning("提示", f"未能从 {ext} 文件提取到图标", parent=dlg)
+                        return
+                    custom_icon_b64[0] = b64
+                    new_img = IconExtractor.base64_to_ctkimage(b64, 48)
+                    icon_preview.configure(image=new_img)
+                    icon_preview.image = new_img
+                elif ext == ".lnk":
+                    # 解析快捷方式目标后提取图标
+                    target = self._resolve_shortcut_target(filepath)
+                    if target and target.lower() != filepath.lower():
+                        target_ext = os.path.splitext(target)[1].lower()
+                        if target_ext in (".exe", ".dll"):
+                            b64 = IconExtractor.extract_from_exe(target)
+                        else:
+                            # 目标不是 exe，用图片方式加载
+                            import PIL.Image as PILImage
+                            img = PILImage.open(target)
+                            img = img.convert("RGBA")
+                            img = img.resize((48, 48), PILImage.LANCZOS)
+                            buf = BytesIO()
+                            img.save(buf, format="PNG")
+                            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    else:
+                        messagebox.showwarning("提示", "无法解析此快捷方式", parent=dlg)
+                        return
+                    if not b64:
+                        messagebox.showwarning("提示", "未能提取到图标", parent=dlg)
+                        return
+                    custom_icon_b64[0] = b64
+                    new_img = IconExtractor.base64_to_ctkimage(b64, 48)
+                    icon_preview.configure(image=new_img)
+                    icon_preview.image = new_img
+                else:
+                    # 图片文件
                     import PIL.Image as PILImage
                     img = PILImage.open(filepath)
                     img = img.convert("RGBA")
@@ -6039,8 +6160,8 @@ class QuickLaunchView(BaseView):
                     new_img = IconExtractor.base64_to_ctkimage(b64, 48)
                     icon_preview.configure(image=new_img)
                     icon_preview.image = new_img
-                except Exception as e:
-                    messagebox.showerror("错误", f"无法加载图片：{e}", parent=dlg)
+            except Exception as e:
+                messagebox.showerror("错误", f"无法加载：{e}", parent=dlg)
 
         btns_row = ctk.CTkFrame(icon_info, fg_color="transparent")
         btns_row.pack(anchor="w", pady=(5, 0))
@@ -6116,7 +6237,7 @@ class QuickLaunchView(BaseView):
 
         ctk.CTkLabel(
             icon_info,
-            text="支持 PNG/ICO/JPG，自动缩放为 48x48\n「提取路径图标」可从 EXE/系统命令直接获取真实图标",
+            text="支持 PNG/ICO/JPG/EXE/DLL/LNK，自动缩放为 48x48\n自定义图标不会被「刷新图标」覆盖\n「提取路径图标」可从当前路径直接获取真实图标",
             font=ctk.CTkFont(family="微软雅黑", size=11),
             text_color="gray50",
             justify="left",
@@ -6158,6 +6279,7 @@ class QuickLaunchView(BaseView):
 
                 sc = self.config.add_shortcut(
                     name, stype, path_val, final_icon, cat,
+                    custom_icon=has_custom_icon,
                 )
                 dlg.destroy()
                 self._refresh()
@@ -6184,6 +6306,7 @@ class QuickLaunchView(BaseView):
                         shortcut["id"],
                         name=name, type=stype, path=path_val,
                         icon=custom_icon_b64[0], category=cat,
+                        custom_icon=True,
                     )
                     dlg.destroy()
                     self._refresh()
@@ -6193,6 +6316,7 @@ class QuickLaunchView(BaseView):
                         shortcut["id"],
                         name=name, type=stype, path=path_val,
                         icon=IconExtractor._default_icon(), category=cat,
+                        custom_icon=False,
                     )
                     sc_id = shortcut["id"]
                     dlg.destroy()
@@ -6586,6 +6710,397 @@ class QuickLaunchView(BaseView):
             command=confirm_add_selected,
         ).pack(side="right")
 
+
+    # ================================================================
+    # 拖拽导入 + 自动分类 + 图标刷新
+    # ================================================================
+
+    def _register_drag_drop(self):
+        """在所有子控件上递归注册文件拖拽支持"""
+        if not _HAS_DND:
+            return
+        app = self.winfo_toplevel()
+        if not getattr(app, '_dnd_initialized', False):
+            # 根窗口的 DnD 可能还在初始化，稍后重试
+            self.after(300, self._register_drag_drop)
+            return
+
+        def _on_drop(event):
+            raw = event.data
+            if not raw:
+                return
+            cleaned = []
+            parts = raw.split('}{')
+            for p in parts:
+                p = p.strip()
+                if p.startswith('{'):
+                    p = p[1:]
+                if p.endswith('}'):
+                    p = p[:-1]
+                p = p.strip('"').strip("'")
+                p = p.replace("\u200b", "").replace("\ufeff", "")
+                if p:
+                    cleaned.append(p)
+            if cleaned:
+                self.after(0, lambda f=list(cleaned): self._import_dropped_files(f))
+
+        def _on_enter(event):
+            try:
+                if self._grid_frame:
+                    self._grid_frame.configure(fg_color=("gray82", "gray30"))
+            except Exception:
+                pass
+
+        def _on_leave(event):
+            try:
+                if self._grid_frame:
+                    self._grid_frame.configure(fg_color="transparent")
+            except Exception:
+                pass
+
+        # 递归注册所有子控件
+        def register_recursive(widget):
+            try:
+                widget.drop_target_register(DND_FILES)
+                widget.dnd_bind('<<Drop>>', _on_drop)
+                widget.dnd_bind('<<DropEnter>>', _on_enter)
+                widget.dnd_bind('<<DropLeave>>', _on_leave)
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                register_recursive(child)
+
+        # 注册到 scroll 及其所有子控件
+        if self.scroll:
+            register_recursive(self.scroll)
+        if self._grid_frame:
+            register_recursive(self._grid_frame)
+
+        # 注意：CTk root 窗口没有 drop_target_register，跳过
+        # 注册已在子控件层级完成，无需根窗口兜底
+
+
+
+    def _on_drag_enter(self, event=None):
+        """拖拽进入视觉反馈"""
+        try:
+            if self._grid_frame:
+                self._grid_frame.configure(fg_color=("gray82", "gray30"))
+        except Exception:
+            pass
+
+    def _on_drag_leave(self, event=None):
+        """拖拽离开恢复"""
+        try:
+            if self._grid_frame:
+                self._grid_frame.configure(fg_color="transparent")
+        except Exception:
+            pass
+
+    def _on_drop(self, event=None):
+        """处理文件放置事件"""
+        try:
+            if self._grid_frame:
+                self._grid_frame.configure(fg_color="transparent")
+        except Exception:
+            pass
+
+
+    def _import_dropped_files(self, files):
+        u"""批量导入拖放的文件/文件夹/快捷方式"""
+        imported = []
+        if not files:
+            return
+
+        for filepath in files:
+            try:
+                # 路径清理（去除引号、零宽字符等）
+                if not isinstance(filepath, str):
+                    continue
+                filepath = filepath.strip().strip('"').strip("'")
+                filepath = filepath.replace("​", "").replace("‌", "").replace("﻿", "")
+                if not filepath:
+                    continue
+                if not os.path.exists(filepath):
+                    # 尝试去掉多余的尾部反斜杠
+                    while filepath.endswith(os.sep) and len(filepath) > 1:
+                        filepath = filepath[:-1]
+                    if not os.path.exists(filepath):
+                        continue
+                # 对于 .lnk：优先解析真实目标，但如果解析后仍为 .lnk（特殊的快捷方式），保留原路径
+                is_lnk = filepath.lower().endswith(".lnk")
+                if is_lnk:
+                    resolved = self._resolve_shortcut_target(filepath)
+                    if resolved and resolved.lower() != filepath.lower() and os.path.exists(resolved):
+                        target_path = resolved
+                    else:
+                        target_path = filepath
+                else:
+                    target_path = filepath
+
+                # 先根据真实目标判断分类和图标
+                stype, category = self._auto_categorize_file(target_path)
+                use_for_icon = target_path
+
+                # 文件夹：使用 stype=folder 更准确
+                try:
+                    if os.path.isdir(target_path):
+                        stype = "folder"
+                except Exception:
+                    pass
+
+                # 原始拖拽文件若是 .lnk 且解析后为 EXE：用 EXE 提图标；否则用原始路径
+                icon = None
+                try:
+                    if stype == "app":
+                        icon = IconExtractor.extract_from_exe(use_for_icon)
+                    elif stype == "folder":
+                        icon = IconExtractor.extract_from_exe(use_for_icon)
+                    elif stype == "url":
+                        icon = IconExtractor.extract_from_url(use_for_icon)
+                except Exception:
+                    icon = None
+
+                # 名称：优先用原始文件（比如 lnk 的显示名）去扩展名
+                name_base = os.path.basename(filepath if filepath else target_path)
+                if is_lnk:
+                    name = os.path.splitext(name_base)[0]
+                elif stype == "folder":
+                    name = name_base
+                else:
+                    name = os.path.splitext(name_base)[0]
+                if not name:
+                    name = target_path
+
+                # 保存路径：如果是 .lnk 指向的 EXE，保存 EXE 路径；否则保存原始路径
+                save_path = target_path if (is_lnk and os.path.exists(target_path) and target_path.lower() != filepath.lower()) else filepath
+
+                self.config.add_shortcut(
+                    name=name, stype=stype, path=save_path,
+                    icon=icon, category=category,
+                )
+                imported.append(name)
+            except Exception:
+                continue
+
+        if imported:
+            try:
+                self._build_grid(force=True)
+            except Exception:
+                pass
+            try:
+                self._rebuild_cat_buttons()
+            except Exception:
+                pass
+            try:
+                self.count_label.configure(text=f"  ({len(self.config.shortcuts)} 个项目)")
+            except Exception:
+                pass
+            try:
+                self._show_toast(f"已导入 {len(imported)} 个项目")
+            except Exception:
+                pass
+
+    def _resolve_shortcut_target(self, filepath):
+        u"""解析 .lnk 快捷方式的目标路径（优先 VBS，再回退 ctypes/PowerShell）"""
+        if not filepath.lower().endswith(".lnk"):
+            return filepath
+        target = None
+
+        # 方案 A：VBS 脚本解析（最轻量，无额外依赖）
+        try:
+            import tempfile, subprocess
+            NL = chr(10)
+            vbs = (
+                "Set args=WScript.Arguments" + NL +
+                "Set s=CreateObject(" + chr(34) + "WScript.Shell" + chr(34) + ")" + NL +
+                "Set l=s.CreateShortcut(args(0))" + NL +
+                "WScript.Echo l.TargetPath" + NL
+            )
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".vbs", delete=False, encoding="utf-8")
+            tmp.write(vbs)
+            tmp.close()
+            vbs_path = tmp.name
+            try:
+                r = subprocess.run(
+                    ["cscript", "//Nologo", "//B", vbs_path, filepath],
+                    capture_output=True, text=True, timeout=8,
+                    creationflags=0x08000000,
+                )
+                out = r.stdout.strip()
+                if out and os.path.exists(out):
+                    target = out
+            finally:
+                try:
+                    os.unlink(vbs_path)
+                except Exception:
+                    pass
+        except Exception:
+            target = None
+
+        if target and os.path.exists(target):
+            return target
+
+        # 方案 B：PowerShell (回退)
+        try:
+            import subprocess
+            safe_path = filepath.replace("'", "''")
+            ps_script = (
+                "$s=(New-Object -ComObject WScript.Shell).CreateShortcut('"
+                + safe_path
+                + "');$s.TargetPath"
+            )
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                capture_output=True, text=True, timeout=8,
+                creationflags=0x08000000,
+            )
+            out = result.stdout.strip()
+            if out and os.path.exists(out):
+                target = out
+        except Exception:
+            target = None
+
+        return target if (target and os.path.exists(target)) else filepath
+
+    def _auto_categorize_file(self, filepath):
+        u"""根据文件类型自动分类，返回 (stype, category)"""
+        ext = os.path.splitext(filepath)[1].lower()
+        basename = os.path.basename(filepath).lower()
+
+        # 文件夹优先判断（避免被扩展名判断抢占）
+        try:
+            if os.path.isdir(filepath):
+                return ("app", "文件夹")
+        except Exception:
+            pass
+
+        # .lnk：如果解析不到目标，归为「快捷方式」，保留原路径
+        if ext == ".lnk":
+            # 解析真实目标后再次判断类型
+            real = self._resolve_shortcut_target(filepath)
+            if real and real.lower() != filepath.lower():
+                _, cat = self._auto_categorize_file(real)
+                return ("app", cat)
+            return ("app", "快捷方式")
+
+        if ext == ".url":
+            return ("url", "网址收藏")
+
+        # 可执行类
+        if ext in (".exe", ".msi", ".msix", ".appx", ".bat", ".cmd", ".com", ".scr"):
+            return ("app", "应用程序")
+        if ext in (".dll", ".ocx"):
+            return ("app", "系统工具")
+
+        # 文档类
+        if ext in (".doc", ".docx", ".pdf", ".txt", ".rtf", ".md", ".xls", ".xlsx",
+                   ".ppt", ".pptx", ".csv", ".odt", ".ods", ".odp", ".epub", ".mobi"):
+            return ("app", "文档")
+
+        # 图片类
+        if ext in (".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tif", ".tiff", ".heic", ".raw"):
+            return ("app", "图片")
+
+        # 视频类
+        if ext in (".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".rmvb", ".ts"):
+            return ("app", "视频")
+
+        # 音频类
+        if ext in (".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a", ".ape", ".opus", ".mid"):
+            return ("app", "音频")
+
+        # 压缩包
+        if ext in (".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".z", ".tgz", ".tbz2", ".iso", ".img"):
+            return ("app", "压缩包")
+
+        # 开发
+        if ext in (".py", ".pyw", ".js", ".ts", ".tsx", ".jsx", ".html", ".htm", ".css", ".scss", ".less",
+                   ".java", ".c", ".cpp", ".cc", ".h", ".hpp", ".go", ".rs", ".php", ".rb", ".swift", ".kt",
+                   ".vue", ".json", ".xml", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".sh", ".ps1"):
+            return ("app", "开发工具")
+
+        # 数据库
+        if ext in (".db", ".sqlite", ".sqlite3", ".sql", ".mdb", ".accdb", ".db3"):
+            return ("app", "数据库")
+
+        # 系统命令 / 控制面板
+        system_cmds = ["cmd", "powershell", "pwsh", "notepad", "calc", "control",
+                       "regedit", "taskmgr", "devmgmt", "services",
+                       "eventvwr", "diskmgmt", "msconfig", "compmgmt"]
+        cmd_base = os.path.splitext(basename)[0]
+        if cmd_base in system_cmds or ext in (".msc", ".cpl"):
+            return ("system", "系统工具")
+
+        return ("app", "其他")
+
+    def _show_toast(self, message, duration=2000):
+        """显示临时提示"""
+        try:
+            toast = ctk.CTkToplevel(self)
+            toast.overrideredirect(True)
+            toast.attributes("-topmost", True)
+            label = ctk.CTkLabel(
+                toast, text=message,
+                font=ctk.CTkFont(family="微软雅黑", size=12),
+                fg_color=("gray30", "gray70"),
+                text_color=("gray10", "gray90"),
+                corner_radius=8,
+                width=200, height=40,
+            )
+            label.pack(padx=15, pady=8)
+            toast.update_idletasks()
+            w = toast.winfo_width()
+            h = toast.winfo_height()
+            sw = toast.winfo_screenwidth()
+            sh = toast.winfo_screenheight()
+            toast.geometry(f"+{(sw - w) // 2}+{sh - h - 80}")
+            toast.after(duration, toast.destroy)
+        except Exception:
+            pass
+
+    def _refresh_all_icons(self):
+        """刷新所有快捷方式图标"""
+        IconExtractor._cache.clear()
+        shortcuts = self.config.shortcuts
+        if not shortcuts:
+            self._show_toast("没有可刷新的项目")
+            return
+
+        def refresh_thread():
+            refreshed = 0
+            for sc in shortcuts:
+                try:
+                    stype = sc.get("type", "app")
+                    path = sc.get("path", "")
+                    if stype == "app" and path and os.path.exists(path):
+                        icon = IconExtractor.extract_from_exe(path)
+                        if icon:
+                            sc["icon"] = icon
+                            refreshed += 1
+                    elif stype == "url" and path:
+                        icon = IconExtractor.extract_from_url(path)
+                        if icon:
+                            sc["icon"] = icon
+                            refreshed += 1
+                    elif stype == "system" and path:
+                        real_path = IconExtractor.resolve_system_cmd_path(path)
+                        if real_path:
+                            icon = IconExtractor.extract_from_exe(real_path)
+                            if icon:
+                                sc["icon"] = icon
+                                refreshed += 1
+                except Exception:
+                    pass
+
+            self.config.save()
+            self.after(0, lambda: self._build_grid(force=True))
+            self.after(0, lambda: self._show_toast(f"图标刷新完成：{refreshed} 个"))
+
+        self._show_toast("正在刷新图标...")
+        threading.Thread(target=refresh_thread, daemon=True).start()
+
+    
     def refresh(self):
         self._refresh()
 
@@ -6677,6 +7192,7 @@ def set_window_app_user_model_id(hwnd, appid=APP_USER_MODEL_ID):
 
 
 class WorkbenchApp(ctk.CTk):
+    "知行工作台主窗口 — 支持文件拖拽"
     """主应用窗口"""
 
     # 导航项定义（可扩展：在此添加新的导航项即可）
@@ -6765,6 +7281,8 @@ class WorkbenchApp(ctk.CTk):
         # 规范化：首页固定第一位，设置倒数第二位，关于最后一位
         self._nav_order = self._normalize_nav_order(self._nav_order)
 
+        # v3.2 拖拽支持初始化已移至 Application._run_main
+
         # 构建界面
         self._build_layout()
 
@@ -6783,6 +7301,27 @@ class WorkbenchApp(ctk.CTk):
         # v2.5.8+：窗口可见后再写一次 AppID PropertyStore（DWM 刷新后仍生效）
         try:
             set_window_app_user_model_id(int(self.winfo_id()))
+        except Exception:
+            pass
+        # v3.2 启动保护：确保窗口在屏幕可见区域内（防止多屏切换导致窗口漂到屏幕外）
+        try:
+            import re as _re
+            _geom_now = self.geometry()
+            _mm = _re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", _geom_now)
+            if _mm:
+                _W, _H, _X, _Y = int(_mm.group(1)), int(_mm.group(2)), int(_mm.group(3)), int(_mm.group(4))
+                _sw = self.winfo_screenwidth()
+                _sh = self.winfo_screenheight()
+                _min_visible = 80
+                _outside = (_X < -_W + _min_visible) or (_X > _sw - _min_visible) or                              (_Y < -_H + _min_visible) or (_Y > _sh - _min_visible)
+                if _outside:
+                    _log(f"[Launch] window outside screen ({_X},{_Y}), forcing center")
+                    center_window(self, _W, _H)
+        except Exception:
+            pass
+        # 强制确保 alpha 为 1（防止 -alpha 0 被意外残留）
+        try:
+            self.attributes("-alpha", 1.0)
         except Exception:
             pass
 
@@ -6806,6 +7345,113 @@ class WorkbenchApp(ctk.CTk):
             self.withdraw()
         except Exception:
             pass
+
+    def _init_dnd(self):
+        u"""延迟初始化 tkdnd（加载 DLL，子控件注册由各视图自行完成）"""
+        # 强制诊断：直接写文件，绕过 _log
+        try:
+            import datetime as _dt
+            _dl = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "zhixing_workbench", "debug.log")
+            with open(_dl, "a", encoding="utf-8") as _df:
+                _df.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] === _init_dnd CALLED === _HAS_DND={_HAS_DND}\n")
+        except Exception:
+            pass
+        try:
+            _tdnd_version = None
+
+            # 路径1: tkinterdnd2 包自身目录（dev 模式）
+            try:
+                import tkinterdnd2 as _tdnd_pkg
+                _pkg_dir = os.path.dirname(_tdnd_pkg.__file__)
+                _candidate = os.path.join(_pkg_dir, "tkdnd", "win-x64")
+                if os.path.isdir(_candidate):
+                    self.tk.eval(f"lappend auto_path {{{_candidate}}}")
+                    _tdnd_version = self.tk.call("package", "require", "tkdnd")
+                    _log(f"[DnD] loaded from package dir: {_candidate}")
+            except Exception:
+                pass
+
+            # 路径2: PyInstaller 打包目录（_internal 子目录）
+            if not _tdnd_version:
+                try:
+                    _base = os.path.dirname(os.path.abspath(sys.argv[0]))
+                    for _sub in ["_internal", ""]:
+                        _candidate = os.path.join(_base, _sub, "tkdnd", "win-x64")
+                        if os.path.isdir(_candidate):
+                            self.tk.eval(f"lappend auto_path {{{_candidate}}}")
+                            _tdnd_version = self.tk.call("package", "require", "tkdnd")
+                            _log(f"[DnD] loaded from bundle: {_candidate}")
+                            break
+                except Exception:
+                    pass
+
+            # 路径3: PyInstaller _MEIPASS 临时目录
+            if not _tdnd_version:
+                try:
+                    _base = getattr(sys, "_MEIPASS", "")
+                    if _base:
+                        _candidate = os.path.join(_base, "tkdnd", "win-x64")
+                        if os.path.isdir(_candidate):
+                            self.tk.eval(f"lappend auto_path {{{_candidate}}}")
+                            _tdnd_version = self.tk.call("package", "require", "tkdnd")
+                            _log(f"[DnD] loaded from MEIPASS: {_candidate}")
+                except Exception:
+                    pass
+
+            # 路径4: 官方 require() 兜底
+            if not _tdnd_version:
+                try:
+                    _tdnd_version = TkinterDnD.require(self)
+                    _log("[DnD] loaded via TkinterDnD.require()")
+                except Exception:
+                    pass
+
+            self._dnd_initialized = bool(_tdnd_version)
+            if self._dnd_initialized:
+                _log(f"[DnD] tkdnd {_tdnd_version} loaded OK")
+                # 通知所有视图重新注册（此时 tkdnd 已就绪）
+                self.after(100, self._notify_views_dnd_ready)
+            else:
+                _log("[DnD] tkdnd init failed - no DLL found")
+        except Exception as e:
+            _log(f"[DnD] init error: {e}")
+            self._dnd_initialized = False
+
+    def _notify_views_dnd_ready(self):
+        u"""通知当前视图 tkdnd 已就绪，触发重新注册"""
+        if self.current_view and hasattr(self.current_view, '_register_drag_drop'):
+            try:
+                self.current_view._register_drag_drop()
+                _log("[DnD] notified current view to register drop targets")
+            except Exception as e:
+                _log(f"[DnD] notify view error: {e}")
+
+    def _on_app_drop(self, event):
+        u"""根窗口级 Drop 事件处理"""
+        raw = event.data
+        if not raw:
+            return
+        cleaned = []
+        parts = raw.split("}{")
+        for p in parts:
+            p = p.strip()
+            if p.startswith("{"):
+                p = p[1:]
+            if p.endswith("}"):
+                p = p[:-1]
+            p = p.strip('"').strip("'")
+            p = p.replace("\u200b", "").replace("\ufeff", "")
+            if p:
+                cleaned.append(p)
+        if cleaned and self.current_view and hasattr(self.current_view, "_import_dropped_files"):
+            self.after(0, lambda f=list(cleaned): self.current_view._import_dropped_files(f))
+
+    def _on_app_drag_enter(self, event):
+        pass
+
+    def _on_app_drag_leave(self, event):
+        pass
+
 
     def _build_layout(self):
         # 侧边栏
@@ -7423,8 +8069,24 @@ class Application:
 
         self.app = WorkbenchApp(self.config)
         # 确保主窗口可见并置顶
+        try:
+            if self.app.state() == "withdrawn":
+                self.app.state("normal")
+        except Exception:
+            pass
         self.app.deiconify()
+        self.app.update_idletasks()
+        try:
+            self.app.attributes("-alpha", 1.0)
+        except Exception:
+            pass
         self.app.lift()
+        # v3.2: 立刻初始化 tkdnd（在主窗口创建后）
+        if _HAS_DND:
+            try:
+                self.app._init_dnd()
+            except Exception as _e:
+                _log(f"[DnD] init in _run_main failed: {_e}")
         # 延迟绑定 <Unmap>，避免启动时 withdraw/deiconify 产生的 <Unmap> 事件误触发托盘隐藏
         self.app.after(500, self._bind_minimize)
         # 注册 QQ 式靠边停靠功能（主窗口创建后才能绑定）
@@ -7459,11 +8121,21 @@ class Application:
             return
         # 取消隐藏并置顶
         try:
+            try:
+                if app.state() == "withdrawn":
+                    app.state("normal")
+            except Exception:
+                pass
             app.deiconify()
+            try:
+                app.attributes("-alpha", 1.0)
+            except Exception:
+                pass
+            app.update_idletasks()
             app.lift()
             app.focus_force()
             app.attributes("-topmost", True)
-            app.after(200, lambda: app.attributes("-topmost", False))
+            app.after(200, lambda: self._release_topmost())
         except Exception:
             pass
         # 触发锁屏
@@ -7849,11 +8521,57 @@ class TrayManager:
         if app is None:
             return
         try:
-            app.deiconify()
+            # 确保窗口状态正常（防止 stuck in withdrawn）
+            try:
+                if app.state() == "withdrawn":
+                    try:
+                        app.state("normal")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # 强制 deiconify
+            try:
+                app.deiconify()
+            except Exception:
+                pass
+
+            # 恢复 alpha（防止 -alpha 0 残留）
+            try:
+                app.attributes("-alpha", 1.0)
+            except Exception:
+                pass
+
+            # 确保窗口在屏幕内
+            try:
+                import re as _re
+                _geom_now = app.geometry()
+                _mm = _re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", _geom_now)
+                if _mm:
+                    _W, _H, _X, _Y = int(_mm.group(1)), int(_mm.group(2)), int(_mm.group(3)), int(_mm.group(4))
+                    _sw = app.winfo_screenwidth()
+                    _sh = app.winfo_screenheight()
+                    _min_visible = 80
+                    _outside = (_X < -_W + _min_visible) or (_X > _sw - _min_visible) or                                  (_Y < -_H + _min_visible) or (_Y > _sh - _min_visible)
+                    if _outside:
+                        center_window(app, _W, _H)
+            except Exception:
+                pass
+
+            app.update_idletasks()
             app.lift()
             app.focus_force()
             app.attributes("-topmost", True)
-            app.after(200, lambda: app.attributes("-topmost", False))
+            app.after(250, lambda: self._release_topmost())
+        except Exception:
+            pass
+
+    def _release_topmost(self):
+        app = self._get_app()
+        try:
+            if app is not None and app.winfo_exists():
+                app.attributes("-topmost", False)
         except Exception:
             pass
 

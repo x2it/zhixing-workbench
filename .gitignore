@@ -1,4 +1,4 @@
-﻿# ===== 知行工作台 v3.0 .gitignore =====
+# ===== 知行工作台 v3.0 .gitignore =====
 
 # Python 编译产物
 __pycache__/
@@ -44,3 +44,14 @@ Thumbs.db
 *.bak*
 *.bak_*
 *.backup_*
+
+# ===== v3.2 额外排除 =====
+# PyInstaller 编号构建/输出目录 (build2~19, dist2~19)
+build*/
+dist*/
+
+# MSIX 打包临时目录 (build_msix_v2.py 生成)
+msix_staging/
+
+# macOS 残留
+.DS_Store
