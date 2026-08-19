@@ -1,7 +1,7 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 知行工作台 - 个人桌面工作台应用
-Version: 2.5.7
+Version: 3.2.1
 Design: 扁平化 · 简约大气
 """
 
@@ -37,9 +37,9 @@ except Exception as _e_dnd:
 # 应用常量
 # ============================================================
 APP_NAME = "知行工作台"
-APP_VERSION = "3.2.0"
+APP_VERSION = "3.2.1"
 
-# ===== v3.2 文件日志（生产环境也能看日志，不影响 tkinter） =====
+# ===== v3.2.1 文件日志（生产环境也能看日志，不影响 tkinter） =====
 import datetime as _datetime
 try:
     _log_dir = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "zhixing_workbench")
@@ -878,6 +878,135 @@ class ConfigManager:
         """设置自动锁屏时间（分钟）：0 表示关闭"""
         self._write_settings({"auto_lock_minutes": max(0, int(minutes))})
 
+    # ============================================================
+    # v3.2.1 自动保存 + 开机自启
+    # ============================================================
+    def get_autosave_enabled(self) -> bool:
+        """输入防抖+失焦自动保存（笔记/待办），默认开"""
+        try:
+            return bool(self._read_settings().get("autosave_enabled", True))
+        except Exception:
+            return True
+
+    def set_autosave_enabled(self, enabled: bool):
+        try:
+            self._write_settings({"autosave_enabled": bool(enabled)})
+        except Exception:
+            pass
+
+    def get_auto_start_enabled(self) -> bool:
+        """开机自启（HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run）"""
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                0, winreg.KEY_READ)
+            try:
+                val, _ = winreg.QueryValueEx(key, "ZhixingWorkbench")
+                return bool(val and str(val).strip())
+            except FileNotFoundError:
+                return False
+            finally:
+                try: winreg.CloseKey(key)
+                except Exception: pass
+        except Exception:
+            # 非 Windows 或无权限，读 app_settings 兜底显示
+            try:
+                return bool(self._read_settings().get("auto_start_enabled", False))
+            except Exception:
+                return False
+
+    def set_auto_start_enabled(self, enabled: bool):
+        """写注册表实现开机自启；失败回退到 app_settings 标识"""
+        # 目标可执行路径
+        target = None
+        try:
+            import sys as _s
+            if getattr(_s, "frozen", False):
+                target = _s.executable
+            else:
+                # 源码启动：pythonw.exe "X:/.../main.py"（避免弹 CMD）
+                py_dir = os.path.dirname(_s.executable)
+                pyw = os.path.join(py_dir, "pythonw.exe")
+                if not os.path.exists(pyw):
+                    pyw = _s.executable
+                target = f'""{pyw}" "{os.path.abspath(__file__)}"'
+        except Exception:
+            target = None
+        ok = False
+        try:
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                0, winreg.KEY_SET_VALUE)
+            try:
+                if enabled and target:
+                    winreg.SetValueEx(key, "ZhixingWorkbench", 0, winreg.REG_SZ, target)
+                    ok = True
+                else:
+                    try:
+                        winreg.DeleteValue(key, "ZhixingWorkbench")
+                    except FileNotFoundError:
+                        pass
+                    ok = True
+            finally:
+                try: winreg.CloseKey(key)
+                except Exception: pass
+        except Exception:
+            ok = False
+        try:
+            self._write_settings({"auto_start_enabled": bool(enabled and ok)})
+        except Exception:
+            pass
+        return ok
+
+    # ============================================================
+    # v3.2.1 输入草稿保存（避免输入中途自动生成重复笔记/待办条目）
+    # ============================================================
+    def get_note_draft(self):
+        """返回 (title, content) 元组，不存在则返回 ("","")"""
+        try:
+            s = self._read_settings()
+            return (str(s.get("note_draft_title", "") or ""),
+                    str(s.get("note_draft_content", "") or ""))
+        except Exception:
+            return ("", "")
+
+    def save_note_draft(self, title: str, content: str):
+        """把笔记页输入框内容暂存成草稿（不会生成列表条目）"""
+        try:
+            self._write_settings({
+                "note_draft_title": str(title or ""),
+                "note_draft_content": str(content or ""),
+            })
+        except Exception:
+            pass
+
+    def clear_note_draft(self):
+        """新增完成后，清空草稿"""
+        try:
+            self._write_settings({"note_draft_title": "", "note_draft_content": ""})
+        except Exception:
+            pass
+
+    def get_todo_draft(self) -> str:
+        try:
+            return str(self._read_settings().get("todo_draft_content", "") or "")
+        except Exception:
+            return ""
+
+    def save_todo_draft(self, content: str):
+        try:
+            self._write_settings({"todo_draft_content": str(content or "")})
+        except Exception:
+            pass
+
+    def clear_todo_draft(self):
+        try:
+            self._write_settings({"todo_draft_content": ""})
+        except Exception:
+            pass
+
     def get_data_dir(self):
         """返回当前数据目录"""
         return self._data_dir
@@ -1555,12 +1684,12 @@ class LoginFrame(ctk.CTkFrame):
         _ver_box.pack(pady=(50, 0))
         ctk.CTkLabel(
             _ver_box, text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=11, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=11, weight="bold"),
             text_color=("gray46", "gray56"),
         ).pack(pady=(0, 2))
         ctk.CTkLabel(
             _ver_box, text=f"© 2026 {COPYRIGHT_OWNER} · {COPYRIGHT_SITE}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=10),
+            font=ctk.CTkFont(family="微软雅黑", size=10),
             text_color=("gray42", "gray52"),
         ).pack()
 
@@ -1577,7 +1706,6 @@ class LoginFrame(ctk.CTkFrame):
             self.config.set_remember_password(self.remember_var.get(), pw)
             self.on_login_success()
         elif status == "tampered":
-            from tkinter import messagebox
             self.error_label.configure(text="")
             messagebox.showerror(
                 "安全警告",
@@ -1692,12 +1820,12 @@ class SetupPasswordFrame(ctk.CTkFrame):
         _setup_ver_box.pack(pady=(40, 0))
         ctk.CTkLabel(
             _setup_ver_box, text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=11, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=11, weight="bold"),
             text_color=("gray46", "gray56"),
         ).pack(pady=(0, 2))
         ctk.CTkLabel(
             _setup_ver_box, text=f"© 2026 {COPYRIGHT_OWNER} · {COPYRIGHT_SITE}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=10),
+            font=ctk.CTkFont(family="微软雅黑", size=10),
             text_color=("gray42", "gray52"),
         ).pack()
 
@@ -1773,10 +1901,10 @@ def _get_daily_quote(now=None):
          "《论语·为政》 / Analects, Government"),
         ("三人行，必有我师焉",
          "When I walk along with two others, they may serve me as my teachers.",
-         "《论语·述而》 / Analects, No. 7"),
+         "《论语·述而》 / Analects, Shu Er"),
         ("士不可以不弘毅，任重而道远",
          "A gentleman must be resolute and enduring; his burden is heavy and his road is long.",
-         "《论语·泰伯》 / Analects, No. 8"),
+         "《论语·泰伯》 / Analects, Tai Bo"),
         ("非淡泊无以明志，非宁静无以致远",
          "Without tranquility one cannot have a clear purpose; without calm one cannot reach far.",
          "诸葛亮《诫子书》 / Zhuge Liang"),
@@ -1855,7 +1983,6 @@ def _get_daily_quote(now=None):
          "西方谚语 / Western Proverb"),
     ]
     if now is None:
-        from datetime import datetime
         now = datetime.now()
     seed = now.year * 10000 + now.month * 100 + now.day
     idx = seed % len(QUOTES)
@@ -1879,6 +2006,63 @@ class BaseView(ctk.CTkFrame):
     def refresh(self):
         """子类实现此方法刷新数据"""
         pass
+
+    # ============================================================
+    # v3.2.1 通用工具：toast / 自动保存开关读取
+    # ============================================================
+    def autosave_enabled(self) -> bool:
+        """是否开启自动保存（AppConfig.autosave_enabled），关闭时只能手动保存"""
+        try:
+            return bool(self.config.get_autosave_enabled())
+        except Exception:
+            return True  # 默认开
+
+    def _show_toast(self, message, kind="info", duration_ms=2500):
+        """优先委托给 WorkbenchApp 全局 toast（已存在的）；失败则页面级轻量提示"""
+        try:
+            top = self.winfo_toplevel()
+            app_obj = getattr(top, "app", None)
+            if app_obj is None:
+                app_obj = getattr(self, "app", None)
+            if app_obj is not None and hasattr(app_obj, "_show_toast"):
+                try:
+                    app_obj._show_toast(message, duration=duration_ms)
+                    return
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 兜底：页面级简单 toast
+        try:
+            import tkinter as _tk
+            palette = {
+                "info":    ("#eaf4ff", "#1f5aa6"),
+                "success": ("#eafaf0", "#1f7a3e"),
+                "warn":    ("#fff6e0", "#a6771f"),
+                "error":   ("#ffecec", "#a61f1f"),
+            }
+            bg, fg = palette.get(kind, palette["info"])
+            t = _tk.Toplevel(self)
+            t.wm_overrideredirect(True)
+            t.configure(bg=bg)
+            try: t.attributes("-topmost", True)
+            except Exception: pass
+            _tk.Label(t, text=message, bg=bg, fg=fg, bd=0,
+                      font=("微软雅黑", 12), padx=16, pady=10).pack()
+            try:
+                t.update_idletasks()
+                tw = t.winfo_width(); th = t.winfo_height()
+                top = self.winfo_toplevel()
+                tx = top.winfo_rootx() + max(0, top.winfo_width() - tw - 30)
+                ty = top.winfo_rooty() + max(0, top.winfo_height() - th - 60)
+            except Exception:
+                tw = min(420, len(message) * 18 + 40); th = 44
+                tx = t.winfo_screenwidth() - tw - 30; ty = t.winfo_screenheight() - th - 100
+            tx = max(20, tx); ty = max(20, ty)
+            t.wm_geometry(f"+{tx}+{ty}")
+            t.after(duration_ms, lambda w=t: (w.destroy() if w.winfo_exists() else None))
+        except Exception:
+            pass
 
 
 # ============================================================
@@ -1924,7 +2108,7 @@ class HomeView(BaseView):
             left_pane,
             text=f"{greeting}！",
             anchor="w",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=24, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=24, weight="bold"),
         ).pack(side="top", anchor="w", pady=(0, 14))
 
         # 中英双语金句
@@ -1932,7 +2116,7 @@ class HomeView(BaseView):
         ctk.CTkLabel(
             left_pane, text="Daily Quote  ·  每日金句",
             anchor="w",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=12, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"),
             text_color=("gray55", "gray65"),
         ).pack(anchor="w", pady=(6, 10))
 
@@ -1940,7 +2124,7 @@ class HomeView(BaseView):
             left_pane,
             text=f"{quote_cn}",
             anchor="w", justify="left",
-            font=ctk.CTkFont(family=("微软雅黑", "Segoe UI Variable"), size=15, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=15, weight="bold"),
             text_color=("gray20", "gray90"),
             wraplength=520,
         )
@@ -1950,7 +2134,7 @@ class HomeView(BaseView):
             left_pane,
             text=f"{quote_en}",
             anchor="w", justify="left",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "Segoe UI"), size=13),
+            font=ctk.CTkFont(family="微软雅黑", size=13),
             text_color=("gray50", "gray62"),
             wraplength=520,
         )
@@ -1960,7 +2144,7 @@ class HomeView(BaseView):
             left_pane,
             text=f"— {quote_author}",
             anchor="w", justify="left",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=11),
+            font=ctk.CTkFont(family="微软雅黑", size=11),
             text_color=("gray50", "gray60"),
         ).pack(anchor="w")
 
@@ -1969,7 +2153,7 @@ class HomeView(BaseView):
             right_pane,
             text="",
             anchor="e", justify="right",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "Microsoft YaHei UI"), size=36, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=36, weight="bold"),
             text_color=("#2563EB", "#60A5FA"),
         )
         clock_label.pack(side="top", anchor="e")
@@ -1978,7 +2162,7 @@ class HomeView(BaseView):
             right_pane,
             text=f"{date_str}",
             anchor="e", justify="right",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=13),
+            font=ctk.CTkFont(family="微软雅黑", size=13),
             text_color=("gray50", "gray62"),
         )
         date_label.pack(side="top", anchor="e", pady=(4, 0))
@@ -2086,9 +2270,12 @@ class PomodoroTimer:
     WORK_MINUTES = 25
     BREAK_MINUTES = 5
 
-    def __init__(self, on_tick=None, on_complete=None):
+    def __init__(self, master=None, on_tick=None, on_complete=None):
+        """v3.2.1 修复：master 必须传入（BaseView 子类实例），_after/_after_cancel 不再依赖 _tk._default_root。
+        master=None 时退化为旧行为（仅用于兼容纯逻辑测试）。"""
         import time as _t
         self._time = _t.time
+        self._master = master                       # BaseView 实例：保证 after 始终绑到 Toplevel
         self._stage_total = self.WORK_MINUTES * 60
         self.remaining = self._stage_total
         self.is_break = False
@@ -2140,6 +2327,10 @@ class PomodoroTimer:
             self.remaining = self._stage_total
         self.is_running = True
         self._end_at = self._time() + self.remaining
+        try:
+            PomodoroTimer._log_trace(f"START remaining={self.remaining}s stage={'break' if self.is_break else 'work'} cycles={self.cycles_completed}")
+        except Exception:
+            pass
         self._schedule_tick()
         if self._on_tick:
             try:
@@ -2150,6 +2341,7 @@ class PomodoroTimer:
     def pause(self):
         if self.is_running and self._end_at is not None:
             self.remaining = max(0, int(round(self._end_at - self._time())))
+        was_running = bool(self.is_running)
         self.is_running = False
         self._end_at = None
         if self._timer_id is not None:
@@ -2158,6 +2350,10 @@ class PomodoroTimer:
             except Exception:
                 pass
             self._timer_id = None
+        # v3.2.1：暂停后强制刷新一次 UI（否则「工作中」不变，按钮也不切换为「继续」）
+        if was_running and self._on_tick:
+            try: self._on_tick(self)
+            except Exception: pass
 
     def reset(self):
         self.pause()
@@ -2172,8 +2368,11 @@ class PomodoroTimer:
                 pass
 
     def _schedule_tick(self):
+        # v3.2.1 防重入：排程中不重复排
+        if self._timer_id is not None:
+            return
         try:
-            self._timer_id = self._after(900, self._tick)
+            self._timer_id = self._after(1000, self._tick)
         except Exception:
             self._timer_id = None
 
@@ -2197,18 +2396,61 @@ class PomodoroTimer:
             if self.auto_continue_next:
                 def _cont():
                     if not self.is_running and self.remaining > 0:
+                        # v3.2.1：在 TodoView 级别暂停其他所有番茄钟（避免自动续跑时出现并发）
+                        try:
+                            m = getattr(self, "_master", None)
+                            fn_pause = getattr(m, "_pause_other_timers", None)
+                            if callable(fn_pause):
+                                fn_pause(except_tid=None)  # 这里没有 tid 传参就全局全停？不对：我们保留当前对象正在续跑的不暂停
+                                # 改用 _enforce_single_running(keep=None) 后手动 start；其实只要全停再 start 自己就好
+                                # 简化：不暂停"当前对象"——但 fn_pause 没 except_tid 匹配 tid，直接用更简单的策略：
+                                # 全不在这里操作，因为 master._pause_other_timers 要 tid，我们拿不到。
+                                # 改用另一个入口 _enforce_single_running，在 start() 之后调用，会保留第一个 running（就是我们这个）
+                        except Exception:
+                            pass
                         self.start()
+                        try:
+                            m = getattr(self, "_master", None)
+                            fn_enf = getattr(m, "_enforce_single_running", None)
+                            if callable(fn_enf):
+                                fn_enf(keep_tid=None)  # 保留第一个 running（就是刚 start 这个）
+                        except Exception:
+                            pass
                 try:
                     self._after(1000, _cont)
                 except Exception:
                     pass
             return
+        # v3.2.1：每秒 trace 一次 running+remaining 到 debug.log，方便确认倒计时确实在跑
+        try:
+            PomodoroTimer._log_trace(f"tick running={self.is_running} remaining={self.remaining}s stage={'break' if self.is_break else 'work'} cycles={self.cycles_completed}")
+        except Exception:
+            pass
         if self._on_tick:
             try:
                 self._on_tick(self)
-            except Exception:
-                pass
+            except Exception as _e:
+                try: PomodoroTimer._log_trace(f"on_tick exc: {type(_e).__name__}: {_e}")
+                except Exception: pass
         self._schedule_tick()
+
+    @staticmethod
+    def _log_trace(msg: str):
+        """v3.2.1 番茄钟调试：写到 app 的 debug.log；没注入就 print。不阻塞主流程。"""
+        try:
+            import os as _os, datetime as _dt
+            log_dir = _os.path.join(_os.environ.get("APPDATA", _os.path.expanduser("~")), "zhixing_workbench")
+            _os.makedirs(log_dir, exist_ok=True)
+            log_path = _os.path.join(log_dir, "debug.log")
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"[{_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [Pomodoro] {msg}\n")
+            return
+        except Exception:
+            pass
+        try:
+            print(f"[Pomodoro] {msg}")
+        except Exception:
+            pass
 
     def format_time(self):
         if self.is_running and self._end_at is not None:
@@ -2217,9 +2459,18 @@ class PomodoroTimer:
         return f"{m:02d}:{s:02d}"
 
     def status_text(self):
-        return "休息中" if self.is_break else "工作中"
+        """v3.2.1 区分 paused / running：避免暂停了还显示「工作中」误导用户。"""
+        if self.is_running:
+            return "休息中 ☕" if self.is_break else "工作中 🍅"
+        return "已暂停（休息）" if self.is_break else "已暂停（工作）"
 
     def _after(self, ms, callback):
+        """v3.2.1：优先走 master.after；否则回退 _tk._default_root。"""
+        try:
+            if self._master is not None and hasattr(self._master, "after"):
+                return self._master.after(ms, callback)
+        except Exception:
+            pass
         import tkinter as _tk
         if _tk._default_root is not None:
             return _tk._default_root.after(ms, callback)
@@ -2228,6 +2479,12 @@ class PomodoroTimer:
     def _after_cancel(self, tid):
         if tid is None:
             return
+        try:
+            if self._master is not None and hasattr(self._master, "after_cancel"):
+                self._master.after_cancel(tid)
+                return
+        except Exception:
+            pass
         import tkinter as _tk
         try:
             if _tk._default_root is not None:
@@ -2253,14 +2510,55 @@ class TodoView(BaseView):
         input_frame = ctk.CTkFrame(self, fg_color=("gray90", "gray14"), corner_radius=14, border_width=1, border_color=("gray83", "gray20"))
         input_frame.pack(fill="x", padx=30, pady=(0, 15))
 
+        # v3.2.1 placeholder：输入中途草稿存盘，不自动生成条目（显式回车/按钮/Ctrl+S 才添加）
+        ph = "输入待办事项，回车或 Ctrl+S 添加"
         self.todo_entry = ctk.CTkEntry(
             input_frame,
-            placeholder_text="输入新的待办事项...",
+            placeholder_text=ph,
             height=40,
             font=ctk.CTkFont(family="微软雅黑", size=14),
         )
         self.todo_entry.pack(side="left", fill="x", expand=True, padx=15, pady=15)
         self.todo_entry.bind("<Return>", lambda e: self._add_todo())
+        self._todo_autosave_job = None
+
+        def _todo_save_draft():
+            text = self.todo_entry.get()
+            self.config.save_todo_draft(text if text else "")
+
+        def _on_todo_key(e):
+            # 只存草稿（避免输入中途生成重复半截条目）
+            if self._todo_autosave_job:
+                try: self.after_cancel(self._todo_autosave_job)
+                except Exception: pass
+            self._todo_autosave_job = self.after(600, _todo_save_draft)
+        self.todo_entry.bind("<KeyRelease>", _on_todo_key, add="+")
+
+        # 失焦立刻写草稿，但不自动添加（怕误触生成半截任务）
+        def _on_todo_focusout(e):
+            if self._todo_autosave_job:
+                try: self.after_cancel(self._todo_autosave_job)
+                except Exception: pass
+                self._todo_autosave_job = None
+            _todo_save_draft()
+        self.todo_entry.bind("<FocusOut>", _on_todo_focusout, add="+")
+
+        def _on_todo_ctrl_s(e):
+            if self._todo_autosave_job:
+                try: self.after_cancel(self._todo_autosave_job)
+                except Exception: pass
+                self._todo_autosave_job = None
+            self._add_todo()
+            return "break"
+        self.todo_entry.bind("<Control-s>", _on_todo_ctrl_s, add="+")
+
+        # 回填草稿（用户切到 Todo 视图后，没完成的任务名还在）
+        try:
+            draft = self.config.get_todo_draft()
+            if draft:
+                self.todo_entry.insert(0, draft)
+        except Exception:
+            pass
 
         ctk.CTkButton(
             input_frame, text="添加", width=80, height=40,
@@ -2354,7 +2652,13 @@ class TodoView(BaseView):
             return
         self.config.add_todo(content)
         self.todo_entry.delete(0, "end")
+        if self._todo_autosave_job:
+            try: self.after_cancel(self._todo_autosave_job)
+            except Exception: pass
+            self._todo_autosave_job = None
         self._refresh_list()
+        # 显式提交完成：草稿清空（避免已添加的文字还在输入框）
+        self.config.clear_todo_draft()
 
     def _refresh_list(self):
         """v2.5.0 支持番茄钟运行状态跨刷新保留（快照 → 销毁 → 还原）"""
@@ -2366,6 +2670,8 @@ class TodoView(BaseView):
             states_snapshot[tid] = snap
 
         # 停掉所有 Tk after，防止销毁控件后回调抛错
+        # v3.2.1：刷新前只排程快照，不把 is_running 全炸 False。
+        # 同时确保 t._master 重新指向当前 self（防止视图重建后 master 失效）。
         for info in self._pomodoro_timers.values():
             t = info.get("timer")
             if t is not None:
@@ -2375,8 +2681,10 @@ class TodoView(BaseView):
                         t._timer_id = None
                 except Exception:
                     pass
-                t.is_running = False
-                t._end_at = None
+                try:
+                    t._master = self
+                except Exception:
+                    pass
 
         for widget in self.list_frame.winfo_children():
             try:
@@ -2412,8 +2720,12 @@ class TodoView(BaseView):
             if not snap:
                 continue
             t = info.get("timer")
-            if t is not None and snap.get("timer_snap"):
-                t.restore(snap["timer_snap"])
+            if t is not None:
+                # v3.2.1：restore 前确保 master 绑定正确（_schedule_tick 走 self.after）
+                try: t._master = self
+                except Exception: pass
+                if snap.get("timer_snap"):
+                    t.restore(snap["timer_snap"])
             if snap.get("expanded"):
                 self._expand_pomodoro_from_snapshot(tid)
             if t is not None and info.get("time_label"):
@@ -2421,6 +2733,11 @@ class TodoView(BaseView):
                     self._update_pomodoro_display(tid, t)
                 except Exception:
                     pass
+        # v3.2.1：批量还原后全局强制单运行约束（防止两个任务 snapshot.running 都 True）
+        try:
+            self._enforce_single_running()
+        except Exception:
+            pass
 
     def _expand_pomodoro_from_snapshot(self, todo_id):
         """还原展开态：创建新 inner/time_label/ctrl pack 垂直居中 56 高"""
@@ -2431,20 +2748,18 @@ class TodoView(BaseView):
             try: ch.destroy()
             except Exception: pass
         timer = info["timer"]
-        inner = ctk.CTkFrame(info["frame"], fg_color="transparent", height=56)
-        inner.pack(fill="x", padx=5, pady=(4, 4))
-        inner.pack_propagate(False)
+        inner = ctk.CTkFrame(info["frame"], fg_color="transparent")
+        inner.pack(fill="x", padx=4, pady=6)
 
-        ctrl_frame = ctk.CTkFrame(inner, fg_color="transparent", height=56, width=140)
-        ctrl_frame.pack(side="right", fill="y", padx=(0, 8))
-        ctrl_frame.pack_propagate(False)
+        ctrl_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        ctrl_frame.pack(side="right", fill="y", padx=(4, 10), pady=8)
         ctrl_center = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
         ctrl_center.pack(expand=True, fill="none")
 
         toggle_btn = ctk.CTkButton(
             ctrl_center, text="暂停", width=76, height=32, corner_radius=16,
                 fg_color=("#e57373", "#b85450"), hover_color=("#ef5350", "#c62828"),
-                text_color="white", font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="white", font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"),
             command=lambda: self._toggle_pomo_start(todo_id),
         )
         toggle_btn.pack(side="left", padx=(0, 6))
@@ -2454,25 +2769,28 @@ class TodoView(BaseView):
         reset_btn = ctk.CTkButton(
             ctrl_center, text="↺", width=32, height=32, corner_radius=16,
             fg_color=("gray75", "gray26"), hover_color=("gray68", "gray22"),
-            text_color=("gray30", "gray85"), font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray30", "gray85"), font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"),
             command=lambda: self._reset_pomodoro(todo_id),
         )
         reset_btn.pack(side="left")
         info["reset_btn"] = reset_btn
-        left_wrap = ctk.CTkFrame(inner, fg_color="transparent", height=56)
-        left_wrap.pack(side="left", fill="both", expand=True, padx=(8, 0))
-        left_wrap.pack_propagate(False)
+        left_wrap = ctk.CTkFrame(inner, fg_color="transparent")
+        left_wrap.pack(side="left", fill="both", expand=True, padx=(10, 4), pady=4)
         time_label = ctk.CTkLabel(
             left_wrap, text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
-            font=ctk.CTkFont(family="Consolas", size=18, weight="bold"),
-            text_color=("#b03a2e", "#ff6b6b"), anchor="w", justify="left",
+            font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
+            text_color=("#a93226", "#ff6b6b"), anchor="w", justify="left",
         )
-        time_label.pack(side="left", fill="y", anchor="w", padx=(16, 8))
+        time_label.pack(side="left", fill="both", expand=True, anchor="w", padx=14, pady=10, ipady=4)
         info["time_label"] = time_label
 
 
 
-        info["frame"].pack(fill="x", padx=15, pady=(0, 10), before=None)
+        try:
+            info["frame"].configure(fg_color=("gray82", "gray20"), corner_radius=12)
+        except Exception:
+            pass
+        info["frame"].pack(side="top", fill="x", padx=10, pady=(0, 10), before=None)
         info["expanded"] = True
         if info.get("btn"):
             info["btn"].configure(hover_color=("#f2a4a4", "#a83c3c"),
@@ -2480,19 +2798,22 @@ class TodoView(BaseView):
 
 
     def _build_todo_item(self, todo):
-        """构建单条待办项（含番茄钟）"""
-        item = ctk.CTkFrame(self.list_frame, fg_color=("gray87", "gray17"), corner_radius=12,
+        """v3.2.1 番茄钟布局根治：每条待办是 outer 外层，item_row（原 item） 和 pomo_frame 是兄弟层。
+        这样番茄钟展开后一定在 item_row 下方独立一整行，不会被主行 left/right pack 挤掉。"""
+        outer = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+        outer.pack(fill="x", padx=0, pady=0)
+        item_row = ctk.CTkFrame(outer, fg_color=("gray87", "gray17"), corner_radius=12,
                                 border_width=1, border_color=("gray82", "gray22"))
-        item.pack(fill="x", padx=5, pady=5)
+        item_row.pack(fill="x", padx=5, pady=5, side="top")
 
         # 完成状态复选框
         check_var = ctk.StringVar(value="✓" if todo["done"] else "○")
         check_btn = ctk.CTkButton(
-            item, textvariable=check_var,
+            item_row, textvariable=check_var,
             width=36, height=36,
             fg_color="transparent",
             hover_color=("gray75", "gray30"),
-            font=ctk.CTkFont(size=18),
+            font=ctk.CTkFont(family="微软雅黑", size=18),
             text_color=("#2fae73", "#52c49a") if todo["done"] else ("gray48", "gray58"),
             command=lambda tid=todo["id"], v=check_var: self._toggle_todo(tid, v),
         )
@@ -2504,7 +2825,7 @@ class TodoView(BaseView):
         hover_color = ("#2980b9", "#3498db") if not done_flag else normal_color
 
         content_label = ctk.CTkLabel(
-            item, text=todo["content"],
+            item_row, text=todo["content"],
             anchor="w", justify="left",
             font=ctk.CTkFont(
                 family="微软雅黑", size=14,
@@ -2528,18 +2849,18 @@ class TodoView(BaseView):
 
         # 日期
         ctk.CTkLabel(
-            item, text=todo.get("created", ""),
+            item_row, text=todo.get("created", ""),
             font=ctk.CTkFont(family="微软雅黑", size=11),
             text_color=("gray50", "gray55"),
         ).pack(side="left", padx=10, pady=12)
 
         # 番茄钟按钮（浅色：深红 tomato 图标，深色：亮红）
         pomo_btn = ctk.CTkButton(
-            item, text="🍅", width=30, height=26,
+            item_row, text="🍅", width=30, height=26,
             corner_radius=13,
             fg_color="transparent",
             hover_color=("#ffeded", "#3a2222"),
-            font=ctk.CTkFont(size=14),
+            font=ctk.CTkFont(family="微软雅黑", size=14),
             text_color=("#c0392b", "#ff6b6b"),
             command=lambda tid=todo["id"]: self._toggle_pomodoro(tid),
         )
@@ -2549,7 +2870,7 @@ class TodoView(BaseView):
 
         # 编辑按钮（胶囊造型，放在删除和番茄钟之间）
         edit_btn = ctk.CTkButton(
-            item, text="✒", width=26, height=26,
+            item_row, text="✒", width=26, height=26,
             corner_radius=13,
             fg_color="transparent",
             hover_color=("#5a9ee0", "#3a7bb5"),
@@ -2563,7 +2884,7 @@ class TodoView(BaseView):
 
         # 删除按钮（胶囊造型，统一风格）
         del_btn = ctk.CTkButton(
-            item, text="×", width=26, height=26,
+            item_row, text="×", width=26, height=26,
             corner_radius=13,
             fg_color="transparent",
             hover_color=("#e08080", "#b05555"),
@@ -2576,7 +2897,7 @@ class TodoView(BaseView):
         self._bind_tip(del_btn, "删除")
 
         # 番茄钟显示区域（默认隐藏，启动后展开）
-        pomo_frame = ctk.CTkFrame(item, fg_color="transparent")
+        pomo_frame = ctk.CTkFrame(outer, fg_color="transparent")
         # 不 pack，点击番茄按钮时展开
 
         # 存储引用（v2.5.1：刷新重建时也要更新 frame/btn 为新控件，
@@ -2603,30 +2924,27 @@ class TodoView(BaseView):
             frame = info["frame"]
             if info["timer"] is None:
                 timer = PomodoroTimer(
+                    master=self,
                     on_tick=lambda t: self._update_pomodoro_display(todo_id, t),
                     on_complete=lambda t: self._on_pomodoro_complete(todo_id, t),
                 )
-                timer._after = lambda ms, cb: self.after(ms, cb)
-                timer._after_cancel = lambda tid: self.after_cancel(tid)
                 info["timer"] = timer
             timer = info["timer"]
             for ch in frame.winfo_children():
                 try: ch.destroy()
                 except Exception: pass
-            inner = ctk.CTkFrame(frame, fg_color="transparent", height=56)
-            inner.pack(fill="x", padx=5, pady=(4, 4))
-            inner.pack_propagate(False)
+            inner = ctk.CTkFrame(frame, fg_color="transparent")
+            inner.pack(fill="x", padx=4, pady=6)
 
-            ctrl_frame = ctk.CTkFrame(inner, fg_color="transparent", height=56, width=140)
-            ctrl_frame.pack(side="right", fill="y", padx=(0, 8))
-            ctrl_frame.pack_propagate(False)
+            ctrl_frame = ctk.CTkFrame(inner, fg_color="transparent")
+            ctrl_frame.pack(side="right", fill="y", padx=(4, 10), pady=8)
             ctrl_center = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
             ctrl_center.pack(expand=True, fill="none")
 
             toggle_btn = ctk.CTkButton(
                 ctrl_center, text="暂停", width=76, height=32, corner_radius=16,
                 fg_color=("#e57373", "#b85450"), hover_color=("#ef5350", "#c62828"),
-                text_color="white", font=ctk.CTkFont(size=12, weight="bold"),
+                text_color="white", font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"),
                 command=lambda: self._toggle_pomo_start(todo_id),
             )
             toggle_btn.pack(side="left", padx=(0, 6))
@@ -2636,29 +2954,34 @@ class TodoView(BaseView):
             reset_btn = ctk.CTkButton(
                 ctrl_center, text="↺", width=32, height=32, corner_radius=16,
                 fg_color=("gray75", "gray26"), hover_color=("gray68", "gray22"),
-                text_color=("gray30", "gray85"), font=ctk.CTkFont(size=12, weight="bold"),
+                text_color=("gray30", "gray85"), font=ctk.CTkFont(family="微软雅黑", size=12, weight="bold"),
                 command=lambda: self._reset_pomodoro(todo_id),
             )
             reset_btn.pack(side="left")
             info["reset_btn"] = reset_btn
-            left_wrap = ctk.CTkFrame(inner, fg_color="transparent", height=56)
-            left_wrap.pack(side="left", fill="both", expand=True, padx=(8, 0))
-            left_wrap.pack_propagate(False)
+            left_wrap = ctk.CTkFrame(inner, fg_color="transparent")
+            left_wrap.pack(side="left", fill="both", expand=True, padx=(10, 4), pady=4)
             time_label = ctk.CTkLabel(
-            left_wrap, text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
-                font=ctk.CTkFont(family="Consolas", size=18, weight="bold"),
-                text_color=("#b03a2e", "#ff6b6b"), anchor="w", justify="left",
+                left_wrap, text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
+                font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
+                text_color=("#a93226", "#ff6b6b"), anchor="w", justify="left",
             )
-            time_label.pack(side="left", fill="y", anchor="w", padx=(16, 8))
+            time_label.pack(side="left", fill="both", expand=True, anchor="w", padx=14, pady=10, ipady=4)
             info["time_label"] = time_label
 
 
 
-            frame.pack(fill="x", padx=15, pady=(0, 10), before=None)
+            try:
+                frame.configure(fg_color=("gray82", "gray20"), corner_radius=12)
+            except Exception:
+                pass
+            frame.pack(side="top", fill="x", padx=10, pady=(0, 10), before=None)
             if info.get("btn"):
                 info["btn"].configure(hover_color=("#f2a4a4", "#a83c3c"),
                                       fg_color=("#f3b5b5", "#c24141"))
+            # v3.2.1：首次展开若处于未开始，走互斥逻辑启动（先暂停其他已运行的）
             if (not timer.is_running) and timer.remaining > 0 and not getattr(timer, "_restored", False):
+                self._pause_other_timers(except_tid=todo_id)
                 timer.start()
             try: del timer._restored
             except Exception: pass
@@ -2666,27 +2989,104 @@ class TodoView(BaseView):
             self._collapse_pomodoro(todo_id)
 
     def _collapse_pomodoro(self, todo_id):
+        """v3.2.1：收起不销毁 timer 对象，保留快照（剩余秒数、运行状态），
+        下次展开直接接续，避免 _refresh_list 重建时丢引用。"""
         info = self._pomodoro_timers.get(todo_id)
         if info and info["timer"]:
             info["timer"].pause()
         if info and info["frame"].winfo_exists():
             info["frame"].pack_forget()
             for child in info["frame"].winfo_children():
-                child.destroy()
+                try: child.destroy()
+                except Exception: pass
         if info:
             info["expanded"] = False
-            info["timer"] = None
+            # timer 对象保留在 info["timer"]，不复 None
+            # v3.2.1：折叠后同步 🍅 按钮颜色（运行中=激活红，暂停/未开始=默认透明，用户折叠也能看到状态）
+            t2 = info.get("timer")
+            btn2 = info.get("btn")
+            if t2 is not None and btn2 and btn2.winfo_exists():
+                try:
+                    if t2.is_running:
+                        btn2.configure(
+                            fg_color=("#f3b5b5", "#c24141"),
+                            hover_color=("#f2a4a4", "#a83c3c"),
+                            text_color=("#a93226", "#ff6b6b"),
+                        )
+                    else:
+                        btn2.configure(
+                            fg_color="transparent",
+                            hover_color=("#ffeded", "#3a2222"),
+                            text_color=("#c0392b", "#ff6b6b"),
+                        )
+                except Exception:
+                    pass
+            # v3.2.1：折叠后同步 🍅 按钮颜色（运行中=激活红，暂停/未开始=默认透明，用户折叠也能看到状态）
+            t2 = info.get("timer")
+            btn2 = info.get("btn")
+            if t2 is not None and btn2 and btn2.winfo_exists():
+                try:
+                    if t2.is_running:
+                        btn2.configure(
+                            fg_color=("#f3b5b5", "#c24141"),
+                            hover_color=("#f2a4a4", "#a83c3c"),
+                            text_color=("#a93226", "#ff6b6b"),
+                        )
+                    else:
+                        btn2.configure(
+                            fg_color="transparent",
+                            hover_color=("#ffeded", "#3a2222"),
+                            text_color=("#c0392b", "#ff6b6b"),
+                        )
+                except Exception:
+                    pass
+
+    def _pause_other_timers(self, except_tid=None):
+        """v3.2.1 互斥入口：暂停除 except_tid 之外所有正在运行的番茄钟。
+        保证全局同一时间最多一个 running。调用方包括：
+          - 手动点击「继续」_toggle_pomo_start
+          - 完成后自动进入下一阶段 _on_pomodoro_complete
+          - 快照恢复（_refresh_list 批量 restore 后最多一个 running）
+        """
+        changed = []
+        for tid, info in self._pomodoro_timers.items():
+            if tid == except_tid:
+                continue
+            t = info.get("timer")
+            if t is not None and t.is_running:
+                t.pause()  # 内部会触发 on_tick 刷新该 tid 的 UI
+                changed.append(tid)
+        return changed
+
+    def _enforce_single_running(self, keep_tid=None):
+        """v3.2.1 全局单运行断言：如果 keep_tid 给了就保留它 running，
+        否则保留第一个 running 的，其余全部暂停。用于批量 restore 后纠偏。"""
+        first_kept = False
+        for tid, info in self._pomodoro_timers.items():
+            t = info.get("timer")
+            if t is None or not t.is_running:
+                continue
+            want_keep = (keep_tid is not None and tid == keep_tid) or                         (keep_tid is None and not first_kept)
+            if want_keep:
+                first_kept = True
+                continue
+            t.pause()
 
     def _toggle_pomo_start(self, todo_id):
-        """开始/暂停 合并切换"""
+        """开始/暂停 合并切换。
+        v3.2.1 互斥逻辑：若要开始当前任务，先自动 ⏸ 暂停其他所有正在运行的番茄钟
+        （同一时间只专注一件事，符合番茄工作法；其他任务保留剩余时间，不丢失）。"""
         info = self._pomodoro_timers.get(todo_id)
-        if info and info["timer"]:
-            t = info["timer"]
-            if t.is_running:
-                t.pause()
-            else:
-                t.start()
-            self._update_pomodoro_display(todo_id, t)
+        if not info or not info["timer"]:
+            return
+        t = info["timer"]
+        if t.is_running:
+            t.pause()
+        else:
+            # --- 互斥：其他正在跑的先暂停（复用统一入口）---
+            self._pause_other_timers(except_tid=todo_id)
+            t.start()
+        self._update_pomodoro_display(todo_id, t)
 
     def _reset_pomodoro(self, todo_id):
         info = self._pomodoro_timers.get(todo_id)
@@ -2695,56 +3095,109 @@ class TodoView(BaseView):
             self._update_pomodoro_display(todo_id, info["timer"])
 
     def _update_pomodoro_display(self, todo_id, timer):
+        """v3.2.1 UI 加固：
+        - expanded=True 但 frame 未 pack，主动 pack(side="top")，防止被主行 side=left/right 流动行挤到右边。
+        - time_label / toggle_btn 丢失引用或 winfo_exists=False 时静默，不崩。
+        """
         info = self._pomodoro_timers.get(todo_id)
-        if not info or not info.get("time_label"):
+        if not info:
             return
-        if not info["time_label"].winfo_exists():
-            return
-        icon = "🍅" if not timer.is_break else "☕"
-        # v2.3.16 工作态：浅色深酒红 / 深色亮红；休息态：温和绿
-        if timer.is_break:
-            status_color = ("#1e8449", "#52c49a")
+        # v3.2.1：expanded=True 但 frame 没映射 → 补 pack(side=top)
+        if info.get("expanded") and info.get("frame") and info["frame"].winfo_exists():
+            try:
+                if not info["frame"].winfo_ismapped():
+                    try:
+                        info["frame"].configure(fg_color=("gray82", "gray20"), corner_radius=12)
+                    except Exception:
+                        pass
+                    info["frame"].pack(side="top", fill="x", padx=10, pady=(0, 10))
+            except Exception:
+                pass
+        # v3.2.1：暂停态降饱和成灰色调，一眼就能判断是否在运行
+        if timer.is_running:
+            if timer.is_break:
+                status_color = ("#1e8449", "#52c49a")   # 休息：亮绿
+            else:
+                status_color = ("#b03a2e", "#ff6b6b")   # 工作：亮红
         else:
-            status_color = ("#b03a2e", "#ff6b6b")
-        info["time_label"].configure(
-            text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
-            text_color=status_color,
-        )
+            if timer.is_break:
+                status_color = ("#6b8e6b", "#6b8e7a")   # 暂停（休息）：灰绿
+            else:
+                status_color = ("#8c6b6b", "#b08585")   # 暂停（工作）：灰红
+        time_label_txt = f"{timer.format_time()}  │  {timer.status_text()}"
+        time_label = info.get("time_label")
+        if time_label and time_label.winfo_exists():
+            try:
+                time_label.configure(
+                    text=f"  {time_label_txt}  ",
+                    text_color=status_color,
+                )
+            except Exception as _e_tl:
+                try: PomodoroTimer._log_trace(f"time_label conf exc: {_e_tl}")
+                except Exception: pass
         # 更新切换按钮：暂停时显示▶继续(青绿)，运行中显示⏸暂停(深红)
         toggle_btn = info.get("toggle_btn")
         reset_btn = info.get("reset_btn")
         if toggle_btn and toggle_btn.winfo_exists():
-            if timer.is_running:
-                # 运行中：深红 + 文字「⏸ 暂停」
-                toggle_btn.configure(
-                    text="暂停",
-                    fg_color=("#e57373", "#b85450"),
-                    hover_color=("#ef5350", "#c62828"),
-                )
-            else:
-                # 暂停/未开始：青绿 + 文字「▶ 继续」（用户一眼能看懂）
-                toggle_btn.configure(
-                    text="继续",
-                    fg_color=("#4dab9a", "#2e7d6e"),
-                    hover_color=("#26a69a", "#1b6b5d"),
-                )
+            try:
+                if timer.is_running:
+                    # 运行中：深红 + 文字「⏸ 暂停」
+                    toggle_btn.configure(
+                        text="暂停",
+                        fg_color=("#e57373", "#b85450"),
+                        hover_color=("#ef5350", "#c62828"),
+                    )
+                else:
+                    # 暂停/未开始：青绿 + 文字「▶ 继续」（用户一眼能看懂）
+                    toggle_btn.configure(
+                        text="继续",
+                        fg_color=("#4dab9a", "#2e7d6e"),
+                        hover_color=("#26a69a", "#1b6b5d"),
+                    )
+            except Exception:
+                pass
         # 重置按钮根据状态点亮：未开始时半透明，进行中清晰
         if reset_btn and reset_btn.winfo_exists():
-            total = timer.BREAK_MINUTES * 60 if timer.is_break else timer.WORK_MINUTES * 60
-            if timer.remaining < total:
-                reset_btn.configure(
-                    text="↺",
-                    fg_color=("gray60", "gray30"),
-                    hover_color=("#e08080", "#b05555"),
-                    text_color=("gray20", "gray85"),
-                )
-            else:
-                reset_btn.configure(
-                    text="",
-                    fg_color=("gray75", "gray26"),
-                    hover_color=("gray68", "gray22"),
-                    text_color=("gray30", "gray85"),
-                )
+            try:
+                total = timer.BREAK_MINUTES * 60 if timer.is_break else timer.WORK_MINUTES * 60
+                if timer.remaining < total:
+                    reset_btn.configure(
+                        text="↺",
+                        fg_color=("gray60", "gray30"),
+                        hover_color=("#e08080", "#b05555"),
+                        text_color=("gray20", "gray85"),
+                    )
+                else:
+                    reset_btn.configure(
+                        text="",
+                        fg_color=("gray75", "gray26"),
+                        hover_color=("gray68", "gray22"),
+                        text_color=("gray30", "gray85"),
+                    )
+            except Exception:
+                pass
+        # v3.2.1：🍅 图标按钮视觉反馈（即使折叠收起也要让人一眼看出「某个任务在跑番茄钟」）
+        #   running=True  → 激活红（fg_color 深红/亮红 + hover 更红）
+        #   running=False → 回到默认透明（和其他未开启的 🍅 一致）
+        pomo_btn = info.get("btn")
+        if pomo_btn and pomo_btn.winfo_exists():
+            try:
+                if timer.is_running:
+                    pomo_btn.configure(
+                        fg_color=("#f3b5b5", "#c24141"),
+                        hover_color=("#f2a4a4", "#a83c3c"),
+                        text_color=("#a93226", "#ff6b6b"),
+                    )
+                else:
+                    pomo_btn.configure(
+                        fg_color="transparent",
+                        hover_color=("#ffeded", "#3a2222"),
+                        text_color=("#c0392b", "#ff6b6b"),
+                    )
+            except Exception:
+                pass
+        if timer.is_running and timer.auto_continue_next is False:
+            timer.auto_continue_next = True
 
     def _on_pomodoro_complete(self, todo_id, timer):
         """v2.5.0 阶段完成：① 声音 2 短 1 长 ② 右下角 toast ③ 托盘气泡 ④ 30s 自动继续"""
@@ -2772,8 +3225,8 @@ class TodoView(BaseView):
             try: toast_tl.destroy()
             except Exception: pass
             try:
-                timer._after = lambda ms, cb: self.after(ms, cb)
-                timer._after_cancel = lambda tid: self.after_cancel(tid)
+                timer._master = self  # v3.2.1：master 指向当前 self（内部 _after 会走它）
+                self._pause_other_timers(except_tid=todo_id)  # 自动续跑前也要确保唯一运行
                 timer.start()
                 self._update_pomodoro_display(todo_id, timer)
             except Exception: pass
@@ -2865,8 +3318,7 @@ class TodoView(BaseView):
         except Exception as _e:
             # toast 创建失败 fallback messagebox
             try:
-                from tkinter import messagebox as _mb
-                _mb.showinfo(title, f"{main}\n{sub}")
+                messagebox.showinfo(title, f"{main}\n{sub}")
             except Exception: pass
             _start_next_and_close(None)
 
@@ -2921,8 +3373,10 @@ class NotesView(BaseView):
         input_frame = ctk.CTkFrame(self, fg_color=("gray90", "gray14"), corner_radius=14, border_width=1, border_color=("gray83", "gray20"))
         input_frame.pack(fill="x", padx=30, pady=(0, 15))
 
+        # v3.2.1：输入中途只做「草稿缓存」，不自动生成新笔记条目（避免停顿时重复生成半截笔记）
+        title_ph = "笔记标题...（草稿自动保存，不会自动生成新条目；按 保存笔记 / Ctrl+S 才算保存为一条新笔记）"
         self.note_title = ctk.CTkEntry(
-            input_frame, placeholder_text="笔记标题...",
+            input_frame, placeholder_text=title_ph,
             height=36, font=ctk.CTkFont(family="微软雅黑", size=14),
         )
         self.note_title.pack(fill="x", padx=15, pady=(15, 5))
@@ -2934,11 +3388,89 @@ class NotesView(BaseView):
         )
         self.note_content.pack(fill="x", padx=15, pady=(0, 5))
 
+        # v3.2.1：输入 600ms 防抖 → save_note_draft 只写草稿
+        self._note_autosave_job = None
+
+        def _save_draft_now():
+            t = self.note_title.get()
+            c = self.note_content.get("1.0", "end").strip("")
+            self.config.save_note_draft(t, c)
+            try:
+                if self._note_autosave_label is not None:
+                    self._note_autosave_label.configure(
+                        text="✓ 草稿已保存（Ctrl+S 保存）",
+                        text_color=("#237a3e", "#5fd28e"),
+                    )
+            except Exception:
+                pass
+
+        def _note_changed(e=None):
+            if self._note_autosave_job:
+                try: self.after_cancel(self._note_autosave_job)
+                except Exception: pass
+            self._note_autosave_job = self.after(600, _save_draft_now)
+            try:
+                if self._note_autosave_label is not None:
+                    self._note_autosave_label.configure(
+                        text="● 编辑中…草稿尚未写盘",
+                        text_color=("#a15c00", "#d79b44"),
+                    )
+            except Exception:
+                pass
+
+        def _note_focusout(e=None):
+            if self._note_autosave_job:
+                try: self.after_cancel(self._note_autosave_job)
+                except Exception: pass
+                self._note_autosave_job = None
+            _save_draft_now()
+
+        def _note_ctrl_s(e):
+            # Ctrl+S：如果有内容则提交为真正的新笔记（并清空草稿+输入框）
+            if self._note_autosave_job:
+                try: self.after_cancel(self._note_autosave_job)
+                except Exception: pass
+                self._note_autosave_job = None
+            self._add_note()
+            return "break"
+
+        self.note_title.bind("<KeyRelease>", _note_changed, add="+")
+        self.note_title.bind("<FocusOut>", _note_focusout, add="+")
+        self.note_title.bind("<Control-s>", _note_ctrl_s, add="+")
+        self.note_content.bind("<KeyRelease>", _note_changed, add="+")
+        self.note_content.bind("<FocusOut>", _note_focusout, add="+")
+        self.note_content.bind("<Control-s>", _note_ctrl_s, add="+")
+
+        bottom_bar = ctk.CTkFrame(input_frame, fg_color="transparent")
+        bottom_bar.pack(fill="x", padx=15, pady=(0, 15))
+        self._note_autosave_label = ctk.CTkLabel(
+            bottom_bar, text="✓ 草稿已开启（仅缓存，不生成新条目）",
+            font=ctk.CTkFont(family="微软雅黑", size=11),
+            text_color=("gray50", "gray55"),
+        )
+        self._note_autosave_label.pack(side="left")
+
         ctk.CTkButton(
-            input_frame, text="保存笔记", height=36, width=100,
+            bottom_bar, text="保存", height=36, width=130,
             font=ctk.CTkFont(family="微软雅黑", size=14),
             command=self._add_note,
-        ).pack(side="right", padx=(0, 15), pady=(0, 15))
+        ).pack(side="right")
+
+        # 回填草稿（用户上次写一半没保存新笔记的内容，回来还在）
+        try:
+            dt, dc = self.config.get_note_draft()
+            if dt:
+                self.note_title.insert(0, dt)
+            if dc:
+                self.note_content.insert("1.0", dc)
+                # 如果有草稿，状态行标记一下
+                if self._note_autosave_label is not None:
+                    self._note_autosave_label.configure(
+                        text="✓ 已还原上次未保存的草稿（继续编辑或点右侧按钮正式保存）",
+                        text_color=("#237a3e", "#5fd28e"),
+                    )
+        except Exception:
+            pass
 
         # 输入区可随窗口拉伸：保存按钮单独成行，内容框占满剩余空间
         # （保留上方固定 80px 作为最小高度）
@@ -2969,9 +3501,31 @@ class NotesView(BaseView):
         if not title:
             title = "无标题"
         self.config.add_note(title, content)
+        # 成功生成新笔记后：清空输入框 + 清空草稿缓存（避免下次又回填一次同一个笔记）
         self.note_title.delete(0, "end")
         self.note_content.delete("1.0", "end")
+        self.config.clear_note_draft()
+        if self._note_autosave_job:
+            try: self.after_cancel(self._note_autosave_job)
+            except Exception: pass
+            self._note_autosave_job = None
+        lbl = getattr(self, "_note_autosave_label", None)
+        saved_at = datetime.now().strftime("%H:%M:%S")
+        ellipsis_ttl = (chr(8230) if len(title) > 18 else "")
+        msg = "✓ 已保存「" + title[:18] + ellipsis_ttl + "」· " + saved_at
+        if lbl is not None:
+            lbl.configure(text=msg, text_color=("#237a3e", "#5fd28e"))
+            def _reset():
+                try:
+                    lbl.configure(
+                        text="✓ 草稿已开启（仅缓存，不生成新条目）",
+                        text_color=("gray50", "gray55"),
+                    )
+                except Exception: pass
+            self.after(3500, _reset)
         self._refresh_list()
+        ellipsis_ts = (chr(8230) if len(title) > 16 else "")
+        self._show_toast("笔记已保存：" + title[:16] + ellipsis_ts, kind="success", duration_ms=2000)
 
     @staticmethod
     def _truncate_to_lines(text, wrap_width, max_lines, font_size=13, weight="normal"):
@@ -3109,10 +3663,11 @@ class NotesView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=16, weight="bold"),
         ).pack(anchor="w", padx=25, pady=(20, 10))
 
+        title_ph = "笔记标题...（Ctrl+S 或 保存 按钮）"
         title_entry = ctk.CTkEntry(
             dlg, height=38,
             font=ctk.CTkFont(family="微软雅黑", size=14),
-            placeholder_text="笔记标题...",
+            placeholder_text=title_ph,
         )
         title_entry.pack(fill="x", padx=25, pady=(0, 10))
         title_entry.insert(0, note.get("title", ""))
@@ -3125,32 +3680,124 @@ class NotesView(BaseView):
         content_box.pack(fill="both", expand=True, padx=25, pady=(0, 10))
         content_box.insert("1.0", note.get("content", ""))
 
-        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
-        btn_frame.pack(fill="x", padx=25, pady=(0, 20))
+        # 脏标记 + 800ms 防抖只存（编辑已有笔记本身就希望尽量保存，但如果取消按钮被点，则放弃脏改动）
+        dirty = {"value": False, "saved_once": False}
+        edit_autosave = {"job": None, "last_save_at": None}
+        dt_mod = datetime
 
-        def save_edit():
-            title = title_entry.get().strip()
-            content = content_box.get("1.0", "end").strip()
-            if not title and not content:
+        def get_current():
+            t = title_entry.get().strip()
+            c = content_box.get("1.0", "end").strip()
+            if not t and not c:
+                return None, None
+            if not t:
+                t = "无标题"
+            return t, c
+
+        def do_save_edit():
+            title, content = get_current()
+            if title is None:
+                return False
+            ok = self.config.update_note(note_id, title, content)
+            if ok:
+                dirty["value"] = False
+                dirty["saved_once"] = True
+                t = dt_mod.now().strftime("%H:%M:%S")
+                edit_autosave["last_save_at"] = t
+                try:
+                    status_lbl.configure(text=f"✓ 已保存 · {t}", text_color=("#237a3e", "#5fd28e"))
+                except Exception:
+                    pass
+                self._refresh_list()
+            return ok
+
+        def _edit_changed(e=None):
+            dirty["value"] = True
+            try:
+                if dirty["saved_once"]:
+                    status_lbl.configure(text="● 有未保存改动", text_color=("#a15c00", "#d79b44"))
+                else:
+                    status_lbl.configure(text="● 未保存（0.8s 自动存盘）", text_color=("#c0392b", "#ff9f9f"))
+            except Exception:
+                pass
+            if edit_autosave["job"]:
+                try: dlg.after_cancel(edit_autosave["job"])
+                except Exception: pass
+            # 编辑已有笔记：保持 800ms 防抖落盘（这次是 update_note 覆盖原条目，不会生成多条）
+            edit_autosave["job"] = dlg.after(800, do_save_edit)
+
+        def _edit_ctrl_s(e):
+            if edit_autosave["job"]:
+                try: dlg.after_cancel(edit_autosave["job"])
+                except Exception: pass
+                edit_autosave["job"] = None
+            do_save_edit()
+            return "break"
+
+        title_entry.bind("<KeyRelease>", _edit_changed, add="+")
+        title_entry.bind("<Control-s>", _edit_ctrl_s, add="+")
+        content_box.bind("<KeyRelease>", _edit_changed, add="+")
+        content_box.bind("<Control-s>", _edit_ctrl_s, add="+")
+
+        def save_and_close():
+            if edit_autosave["job"]:
+                try: dlg.after_cancel(edit_autosave["job"])
+                except Exception: pass
+                edit_autosave["job"] = None
+            title, content = get_current()
+            if title is None:
                 messagebox.showwarning("提示", "请输入标题或内容", parent=dlg)
                 return
-            if not title:
-                title = "无标题"
             self.config.update_note(note_id, title, content)
+            dirty["value"] = False
+            dirty["saved_once"] = True
             dlg.destroy()
             self._refresh_list()
 
-        ctk.CTkButton(
-            btn_frame, text="保存", width=100, height=38,
-            font=ctk.CTkFont(family="微软雅黑", size=14, weight="bold"),
-            command=save_edit,
-        ).pack(side="right", padx=(10, 0))
+        def cancel_no_save():
+            # 取消：先关防抖 job，直接销毁（不调用 do_save_edit）
+            if edit_autosave["job"]:
+                try: dlg.after_cancel(edit_autosave["job"])
+                except Exception: pass
+                edit_autosave["job"] = None
+            dlg.destroy()
+
+        # 标题栏 X：有脏改动时先弹确认，再决定保存或放弃
+        def on_x_close():
+            if dirty["value"]:
+                try:
+                    yn = messagebox.askyesnocancel(
+                        "保存改动",
+                        "是否保存改动？\n\n是：保存并关闭\n否：不保存\n取消：返回",
+                        parent=dlg,
+                    )
+                except Exception:
+                    yn = None
+                if yn is True:
+                    save_and_close()
+                elif yn is False:
+                    cancel_no_save()
+                else:
+                    return
+            else:
+                cancel_no_save()
+        dlg.protocol("WM_DELETE_WINDOW", on_x_close)
+
+        btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_frame.pack(fill="x", padx=25, pady=(0, 12))
+
+        status_lbl = ctk.CTkLabel(
+            btn_frame,
+            text="✓ 未修改",
+            font=ctk.CTkFont(family="微软雅黑", size=11),
+            text_color=("gray50", "gray55"),
+        )
+        status_lbl.pack(side="left")
 
         ctk.CTkButton(
-            btn_frame, text="取消", width=100, height=38,
-            fg_color=("gray75", "gray26"),
-            font=ctk.CTkFont(family="微软雅黑", size=14),
-            command=dlg.destroy,
+            btn_frame, text="保存", width=120, height=38,
+            font=ctk.CTkFont(family="微软雅黑", size=14, weight="bold"),
+            command=save_and_close,
         ).pack(side="right")
 
         title_entry.focus_set()
@@ -3187,7 +3834,7 @@ class SettingsView(BaseView):
         ).pack(anchor="w", padx=15, pady=(15, 10))
 
         ctk.CTkLabel(
-            pw_section, text="  请输入当前密码和新密码来完成修改",
+            pw_section, text="  输入当前密码和新密码即可修改",
             font=ctk.CTkFont(family="微软雅黑", size=12),
             text_color="gray60",
         ).pack(anchor="w", padx=15, pady=(0, 15))
@@ -3257,6 +3904,73 @@ class SettingsView(BaseView):
         if self.config.get_auto_dock_enabled():
             self.auto_dock_switch.select()
 
+        # === 运行与保存（v3.2.1） ===
+        run_section = ctk.CTkFrame(scroll, fg_color=("gray90", "gray14"), corner_radius=14, border_width=1, border_color=("gray83", "gray20"))
+        run_section.pack(fill="x", padx=5, pady=(0, 15))
+
+        ctk.CTkLabel(
+            run_section, text="  运行与保存",
+            font=ctk.CTkFont(family="微软雅黑", size=16, weight="bold"),
+            text_color=("gray18", "gray88"),
+        ).pack(anchor="w", padx=15, pady=(15, 10))
+
+        ctk.CTkLabel(
+            run_section,
+            text="  停止输入后自动保存，防止内容丢失。",
+            font=ctk.CTkFont(family="微软雅黑", size=12),
+            text_color="gray60",
+            justify="left",
+            wraplength=620,
+        ).pack(anchor="w", padx=15, pady=(0, 12))
+
+        ctk.CTkLabel(
+            run_section, text="  自动保存（笔记 + 待办）",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            text_color="gray60",
+        ).pack(anchor="w", padx=20, pady=(0, 8))
+
+        self._autosave_switch = ctk.CTkSwitch(
+            run_section,
+            text="1.5s 防抖 · 失焦保存 · Ctrl+S 立即保存",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            command=self._toggle_autosave,
+        )
+        self._autosave_switch.pack(anchor="w", padx=20, pady=(0, 6))
+        if self.config.get_autosave_enabled():
+            self._autosave_switch.select()
+
+        self._autosave_hint = ctk.CTkLabel(
+            run_section, text="",
+            font=ctk.CTkFont(family="微软雅黑", size=11),
+            text_color=("gray50", "gray55"),
+        )
+        self._autosave_hint.pack(anchor="w", padx=20, pady=(0, 14))
+        self.after(30, self._refresh_autosave_hint)
+
+        ctk.CTkLabel(
+            run_section, text="  开机自启",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            text_color="gray60",
+        ).pack(anchor="w", padx=20, pady=(6, 8))
+
+        self._autostart_switch = ctk.CTkSwitch(
+            run_section,
+            text="登录 Windows 时自动启动",
+            font=ctk.CTkFont(family="微软雅黑", size=13),
+            command=self._toggle_auto_start,
+        )
+        self._autostart_switch.pack(anchor="w", padx=20, pady=(0, 6))
+        if self.config.get_auto_start_enabled():
+            self._autostart_switch.select()
+
+        self._autostart_hint = ctk.CTkLabel(
+            run_section, text="",
+            font=ctk.CTkFont(family="微软雅黑", size=11),
+            text_color=("gray50", "gray55"),
+        )
+        self._autostart_hint.pack(anchor="w", padx=20, pady=(0, 20))
+        self.after(50, self._refresh_autostart_hint)
+
         # === 自动锁屏设置 ===
         lock_section = ctk.CTkFrame(scroll, fg_color=("gray90", "gray14"), corner_radius=14, border_width=1, border_color=("gray83", "gray20"))
         lock_section.pack(fill="x", padx=5, pady=(0, 15))
@@ -3269,7 +3983,7 @@ class SettingsView(BaseView):
 
         ctk.CTkLabel(
             lock_section,
-            text="  无操作多少分钟后自动锁定（防止走开被人偷看）。锁屏后主窗口自动收纳至托盘。",
+            text="  无操作若干分钟后自动锁屏，收纳至托盘。",
             font=ctk.CTkFont(family="微软雅黑", size=12),
             text_color="gray60",
             justify="left",
@@ -3323,7 +4037,7 @@ class SettingsView(BaseView):
 
         self.nav_drag_switch = ctk.CTkSwitch(
             nav_section,
-            text="允许非固定项拖拽排序（首页/设置/关于已固定）",
+            text="允许拖拽排序（首页/设置/关于已固定）",
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._toggle_nav_drag,
         )
@@ -3339,13 +4053,72 @@ class SettingsView(BaseView):
         ).pack(anchor="w", padx=20, pady=(10, 8))
         self.cat_rename_switch = ctk.CTkSwitch(
             nav_section,
-            text="允许重命名操作（关闭后卡片双击/右键、分类、导航项更名均禁用）",
+            text="允许重命名（关闭后卡片/分类/导航更名均禁用）",
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._toggle_cat_rename,
         )
         self.cat_rename_switch.pack(anchor="w", padx=20, pady=(0, 20))
         if self.config.get_category_rename_enabled():
             self.cat_rename_switch.select()
+
+        # === 方法：运行与保存 v3.2.1 ===
+    def _toggle_autosave(self):
+        on = bool(self._autosave_switch.get())
+        self.config.set_autosave_enabled(on)
+        # 让 UI 刷新一下状态行
+        self.after(0, self._refresh_autosave_hint)
+        self._show_toast(("自动保存已开启" if on else "自动保存已关闭"), kind="info", duration_ms=2000)
+
+    def _refresh_autosave_hint(self):
+        try:
+            if self.config.get_autosave_enabled():
+                self._autosave_hint.configure(
+                    text="  已开启：笔记 1.5s · 待办 2s · 失焦/Ctrl+S 立即保存",
+                    text_color=("#237a3e", "#5fd28e"),
+                )
+            else:
+                self._autosave_hint.configure(
+                    text="  已关闭：需手动点「保存 / 添加」按钮",
+                    text_color=("#a15c00", "#d79b44"),
+                )
+        except Exception:
+            pass
+
+    def _toggle_auto_start(self):
+        want_on = bool(self._autostart_switch.get())
+        ok = self.config.set_auto_start_enabled(want_on)
+        # 如果写入注册表失败，把开关复位
+        if want_on and not ok:
+            try: self._autostart_switch.deselect()
+            except Exception: pass
+        self.after(0, self._refresh_autostart_hint)
+        if want_on:
+            if ok:
+                self._show_toast("已开启开机自启（HKCU Run 注册表）", kind="success", duration_ms=2500)
+            else:
+                self._show_toast("写入注册表失败，开机自启未启用", kind="error", duration_ms=2500)
+        else:
+            self._show_toast("已关闭开机自启", kind="info", duration_ms=2000)
+
+    def _refresh_autostart_hint(self):
+        try:
+            import sys, os
+            if getattr(sys, "frozen", False):
+                target = f"EXE：{sys.executable}"
+            else:
+                target = f"源码：pythonw.exe + {os.path.abspath(__file__)}"
+            if self.config.get_auto_start_enabled():
+                self._autostart_hint.configure(
+                    text=f"  当前：已开启 · 启动目标：{target}",
+                    text_color=("#237a3e", "#5fd28e"),
+                )
+            else:
+                self._autostart_hint.configure(
+                    text=f"  当前：已关闭 · 可按需开启（不会创建快捷方式、不会影响性能）。",
+                    text_color=("gray50", "gray55"),
+                )
+        except Exception:
+            pass
 
         # === 方法：自动锁屏 ===
     def _change_auto_lock(self, choice):
@@ -3361,7 +4134,6 @@ class SettingsView(BaseView):
         except Exception:
             pass
         self._refresh_lock_hint()
-        from tkinter import messagebox
         # 仅首次开启提示一次
         if minutes > 0 and not getattr(self, "_lock_tip_shown", False):
             self._lock_tip_shown = True
@@ -3598,7 +4370,6 @@ class SettingsView(BaseView):
 
     def _reset_data_dir(self):
         """恢复默认数据存储位置"""
-        from tkinter import messagebox
         if not self.config.is_custom_data_dir():
             self.data_dir_msg.configure(text="当前已是默认位置", text_color="gray60")
             return
@@ -3617,7 +4388,6 @@ class SettingsView(BaseView):
             messagebox.showinfo("恢复成功", "已恢复默认数据位置，建议重启应用。")
 
     def _reset_data(self):
-        from tkinter import messagebox
         result = messagebox.askyesno(
             "确认重置",
             "确定要重置所有数据吗？\n这将清空所有待办事项、笔记，并将密码恢复为默认值。\n此操作不可撤销！",
@@ -3661,13 +4431,13 @@ class AboutView(BaseView):
 
         ctk.CTkLabel(
             info_card, text=f"版本 v{APP_VERSION}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=13, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=13, weight="bold"),
             text_color="#3498db",
         ).pack(pady=(0, 3))
 
         ctk.CTkLabel(
             info_card, text=f"© 2026 {COPYRIGHT_OWNER} · All rights reserved. · {COPYRIGHT_SITE}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=12),
+            font=ctk.CTkFont(family="微软雅黑", size=12),
             text_color=("gray58", "gray58"),
         ).pack(pady=(0, 10))
 
@@ -3719,7 +4489,6 @@ class AboutView(BaseView):
         ).pack(pady=(0, 20))
 
     def _check_update(self):
-        from tkinter import messagebox
         messagebox.showinfo(
             "版本更新",
             f"当前版本：v{APP_VERSION}\n\n"
@@ -3740,6 +4509,8 @@ import subprocess
 import webbrowser
 from io import BytesIO
 
+
+IMG_EXTS_TUPLE = ('.png', '.jpg', '.jpeg', '.bmp', '.gif', '.ico', '.webp', '.tif', '.tiff')
 
 class IconExtractor:
     """从 EXE/DLL 提取图标并转为 Base64 PNG"""
@@ -3821,72 +4592,325 @@ class IconExtractor:
             return p
         return None
 
-    @classmethod
-    def extract_from_exe(cls, exe_path: str, size: int = 48) -> str:
-        """从 EXE 提取图标，返回 base64 编码的 PNG 字符串"""
-        if exe_path in cls._cache:
-            return cls._cache[exe_path]
+    # ==================================================================
+    # v3.2.1 工具：HICON → PIL.Image（安全获取位图像素）
+    # ==================================================================
+    @staticmethod
+    def _hicon_to_pil(hicon, size: int = 48):
+        try:
+            import ctypes
+            from ctypes import wintypes
+            import PIL.Image as PILImage
 
+            class ICONINFO(ctypes.Structure):
+                _fields_ = [
+                    ("fIcon", wintypes.BOOL),
+                    ("xHotspot", wintypes.DWORD),
+                    ("yHotspot", wintypes.DWORD),
+                    ("hbmMask", wintypes.HBITMAP),
+                    ("hbmColor", wintypes.HBITMAP),
+                ]
+
+            class BITMAPINFOHEADER(ctypes.Structure):
+                _pack_ = 2
+                _fields_ = [
+                    ("biSize", wintypes.DWORD),
+                    ("biWidth", ctypes.c_long),
+                    ("biHeight", ctypes.c_long),
+                    ("biPlanes", wintypes.WORD),
+                    ("biBitCount", wintypes.WORD),
+                    ("biCompression", wintypes.DWORD),
+                    ("biSizeImage", wintypes.DWORD),
+                    ("biXPelsPerMeter", ctypes.c_long),
+                    ("biYPelsPerMeter", ctypes.c_long),
+                    ("biClrUsed", wintypes.DWORD),
+                    ("biClrImportant", wintypes.DWORD),
+                ]
+
+            class BITMAPINFO(ctypes.Structure):
+                _fields_ = [
+                    ("bmiHeader", BITMAPINFOHEADER),
+                    ("bmiColors", wintypes.DWORD * 3),
+                ]
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+
+            DIB_RGB_COLORS = 0
+            BI_RGB = 0
+
+            ii = ICONINFO()
+            ok = user32.GetIconInfo(wintypes.HICON(int(hicon)), ctypes.byref(ii))
+            if not ok:
+                return None
+
+            hbm = ii.hbmColor or ii.hbmMask
+            if not hbm:
+                try:
+                    if ii.hbmColor:
+                        gdi32.DeleteObject(ii.hbmColor)
+                    if ii.hbmMask:
+                        gdi32.DeleteObject(ii.hbmMask)
+                except Exception:
+                    pass
+                return None
+
+            try:
+                class DIBSECTION(ctypes.Structure):
+                    _fields_ = [
+                        ("dsBm", ctypes.c_ubyte * 32),
+                        ("dsBmih", BITMAPINFOHEADER),
+                    ]
+                ds = DIBSECTION()
+                cb = ctypes.c_int(ctypes.sizeof(ds))
+                ret = gdi32.GetObjectW(hbm, cb, ctypes.byref(ds))
+                if ret == 0:
+                    return None
+                w = ds.dsBmih.biWidth
+                h = abs(ds.dsBmih.biHeight)
+                if w <= 0 or h <= 0:
+                    return None
+
+                bi = BITMAPINFO()
+                bi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
+                bi.bmiHeader.biWidth = w
+                bi.bmiHeader.biHeight = h
+                bi.bmiHeader.biPlanes = 1
+                bi.bmiHeader.biBitCount = 32
+                bi.bmiHeader.biCompression = BI_RGB
+                bi.bmiHeader.biSizeImage = w * h * 4
+
+                hdc = user32.GetDC(None)
+                try:
+                    pixels = (ctypes.c_ubyte * (w * h * 4))()
+                    gdi32.GetDIBits(hdc, hbm, 0, h,
+                                    ctypes.byref(pixels),
+                                    ctypes.byref(bi),
+                                    DIB_RGB_COLORS)
+                finally:
+                    user32.ReleaseDC(None, hdc)
+
+                barr = bytearray(pixels)
+                i = 0
+                total = w * h * 4
+                while i < total:
+                    barr[i], barr[i + 2] = barr[i + 2], barr[i]
+                    i += 4
+                img = PILImage.frombuffer("RGBA", (w, h), bytes(barr), "raw", "RGBA", 0, -1)
+                if (w, h) != (size, size):
+                    img = img.resize((size, size), PILImage.LANCZOS)
+                return img
+            finally:
+                try:
+                    if ii.hbmColor:
+                        gdi32.DeleteObject(ii.hbmColor)
+                    if ii.hbmMask:
+                        gdi32.DeleteObject(ii.hbmMask)
+                except Exception:
+                    pass
+        except Exception:
+            return None
+
+    # ==================================================================
+    # v3.2.1 通用图标提取：图片缩略图 + 文档/EXE 关联图标 + .lnk 解析
+    # ==================================================================
+    @classmethod
+    def extract_from_file_generic(cls, any_path: str, size: int = 48) -> str:
+        """
+        支持路径范围：
+          - 图片扩展名 (.png/.jpg/.jpeg/.bmp/.gif/.ico/.webp/.tif/.tiff) → 生成缩略图（白底居中）
+          - .lnk → 先解析目标路径（WScript.Shell CreateShortcut），再按目标递归提取
+          - .exe / .dll / .msc / .cpl / .doc / .docx / .pdf / .txt / .xls / .xlsx / .ppt / .pptx 等
+            → 走系统关联图标：
+                1) 首选：PowerShell ExtractAssociatedIcon （稳定可靠）
+                2) 兜底：ctypes SHGetFileInfo HICON → _hicon_to_pil 转 PNG（不用额外依赖）
+        返回 Base64 编码 PNG；失败返回 _default_icon()
+        """
+        if not any_path:
+            return cls._default_icon()
+        if any_path in cls._cache:
+            return cls._cache[any_path]
+        icon_b64 = None
         try:
             import PIL.Image as PILImage
             import tempfile
+            low = any_path.lower()
+            ext = os.path.splitext(low)[1]
 
-            icon_b64 = None
-
-            # 使用 PowerShell System.Drawing.Icon 提取（可靠且不依赖 win32api）
-            try:
-                tmp_ico = tempfile.NamedTemporaryFile(
-                    suffix=".png", delete=False, mode="w+b"
-                )
-                tmp_path = tmp_ico.name
-                tmp_ico.close()
-
-                # 转义路径中的单引号（PowerShell 安全）
-                safe_path = exe_path.replace("'", "''")
-                safe_tmp = tmp_path.replace("'", "''")
-
-                ps_script = (
-                    f'Add-Type -AssemblyName System.Drawing;'
-                    f'try {{'
-                    f'  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon("{safe_path}");'
-                    f'  if ($icon) {{'
-                    f'    $bmp = $icon.ToBitmap();'
-                    f'    $bmp.Save("{safe_tmp}", [System.Drawing.Imaging.ImageFormat]::Png);'
-                    f'    $icon.Dispose(); $bmp.Dispose();'
-                    f'  }}'
-                    f'}} catch {{ exit 1 }}'
-                )
-                result = subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-                    capture_output=True, timeout=10,
-                    creationflags=0x08000000,  # CREATE_NO_WINDOW
-                )
-                if result.returncode == 0 and os.path.exists(tmp_path):
-                    with open(tmp_path, "rb") as f:
-                        img_data = f.read()
-                    if img_data and len(img_data) > 100:
-                        img = PILImage.open(BytesIO(img_data))
-                        img = img.convert("RGBA")
-                        img = img.resize((size, size), PILImage.LANCZOS)
-                        buf = BytesIO()
-                        img.save(buf, format="PNG")
-                        icon_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            # A) 图片扩展名：直接生成缩略图
+            if ext in globals().get("IMG_EXTS_TUPLE", (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".ico", ".webp", ".tif", ".tiff")):
                 try:
-                    os.unlink(tmp_path)
+                    raw = PILImage.open(any_path)
+                    raw.load()
+                    img = raw.convert("RGBA")
+                    w, h = img.size
+                    ratio = min(size / max(w, 1), size / max(h, 1), 1.0)
+                    nw, nh = max(1, int(w * ratio)), max(1, int(h * ratio))
+                    if (nw, nh) != (w, h):
+                        img = img.resize((nw, nh), PILImage.LANCZOS)
+                    # 白底正方形画布（缩略图效果符合用户预期）
+                    canvas = PILImage.new("RGBA", (size, size), (255, 255, 255, 255))
+                    ox = (size - nw) // 2
+                    oy = (size - nh) // 2
+                    try:
+                        canvas.paste(img, (ox, oy), img)
+                    except Exception:
+                        canvas.paste(img, (ox, oy))
+                    buf = BytesIO()
+                    canvas.save(buf, format="PNG")
+                    icon_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                except Exception:
+                    icon_b64 = None
+
+            # B) .lnk：解析快捷方式目标 → 递归提图标；失败回到 lnk 文件本身提关联图标
+            if icon_b64 is None and ext == ".lnk":
+                try:
+                    target = cls._resolve_lnk_target(any_path)
+                    if target and target != any_path:
+                        if os.path.exists(target):
+                            b = cls.extract_from_file_generic(target, size)
+                            if b and b != cls._default_icon():
+                                icon_b64 = b
+                except Exception:
+                    icon_b64 = None
+
+            # C) 方案 1：PowerShell ExtractAssociatedIcon（对 .doc/.pdf/.txt/.exe/.dll 都有效）
+            if icon_b64 is None:
+                try:
+                    tmp_ico = tempfile.NamedTemporaryFile(
+                        suffix=".png", delete=False, mode="w+b"
+                    )
+                    tmp_path = tmp_ico.name
+                    tmp_ico.close()
+                    safe_path = any_path.replace("'", "''")
+                    safe_tmp = tmp_path.replace("'", "''")
+                    ps_script = (
+                        "Add-Type -AssemblyName System.Drawing;"
+                        "try { "
+                        "  $icon = [System.Drawing.Icon]::ExtractAssociatedIcon('" + safe_path + "');"
+                        "  if ($icon) { "
+                        "    $bmp = $icon.ToBitmap(); "
+                        "    $bmp.Save('" + safe_tmp + "', [System.Drawing.Imaging.ImageFormat]::Png); "
+                        "    $icon.Dispose(); $bmp.Dispose(); "
+                        "  } "
+                        "} catch { exit 1 }"
+                    )
+                    result = subprocess.run(
+                        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                        capture_output=True, timeout=10,
+                        creationflags=0x08000000,
+                    )
+                    if result.returncode == 0 and os.path.exists(tmp_path):
+                        with open(tmp_path, "rb") as f:
+                            img_data = f.read()
+                        if img_data and len(img_data) > 100:
+                            try:
+                                img = PILImage.open(BytesIO(img_data)).convert("RGBA")
+                                img = img.resize((size, size), PILImage.LANCZOS)
+                                buf = BytesIO()
+                                img.save(buf, format="PNG")
+                                icon_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                            except Exception:
+                                icon_b64 = None
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
+
+            # D) 方案 2（兜底）：ctypes SHGetFileInfo → HICON → _hicon_to_pil
+            #    处理 ExtractAssociatedIcon 没权限/没编码/中文路径失败的情况
+            if icon_b64 is None:
+                try:
+                    import ctypes
+                    from ctypes import wintypes
+                    SHGFI_ICON = 0x000000100
+                    SHGFI_LARGEICON = 0x000000000
+                    SHGFI_USEFILEATTRIBUTES = 0x000000010
+                    FILE_ATTRIBUTE_NORMAL = 0x80
+
+                    class SHFILEINFOW(ctypes.Structure):
+                        _fields_ = [
+                            ("hIcon", wintypes.HICON),
+                            ("iIcon", ctypes.c_int),
+                            ("dwAttributes", wintypes.DWORD),
+                            ("szDisplayName", wintypes.WCHAR * 260),
+                            ("szTypeName", wintypes.WCHAR * 80),
+                        ]
+
+                    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+                    user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+                    sfi = SHFILEINFOW()
+                    flags = SHGFI_ICON | SHGFI_LARGEICON
+                    if not os.path.exists(any_path):
+                        flags |= SHGFI_USEFILEATTRIBUTES
+                    cb = ctypes.c_int(ctypes.sizeof(sfi))
+                    hr = shell32.SHGetFileInfoW(
+                        any_path,
+                        FILE_ATTRIBUTE_NORMAL,
+                        ctypes.byref(sfi),
+                        cb,
+                        ctypes.c_uint(flags),
+                    )
+                    if hr and sfi.hIcon:
+                        try:
+                            img = cls._hicon_to_pil(sfi.hIcon, size=size)
+                            if img is not None:
+                                buf = BytesIO()
+                                img.save(buf, format="PNG")
+                                icon_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                        finally:
+                            try:
+                                user32.DestroyIcon(sfi.hIcon)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            if not icon_b64:
+                icon_b64 = cls._default_icon()
+            cls._cache[any_path] = icon_b64
+            return icon_b64
+        except Exception:
+            fb = icon_b64 if icon_b64 else cls._default_icon()
+            cls._cache[any_path] = fb
+            return fb
+
+    @staticmethod
+    def _resolve_lnk_target(lnk_path: str):
+        """用 Windows Script Host 解析 .lnk 的 TargetPath/Arguments/WorkingDirectory。
+        若有 TargetPath 且存在 → 返回；否则尝试 WorkingDirectory + TargetPath 组合。
+        解析失败返回 None。"""
+        try:
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
             except Exception:
                 pass
-
-            # 默认占位图标
-            if icon_b64 is None:
-                icon_b64 = cls._default_icon()
-
-            cls._cache[exe_path] = icon_b64
-            return icon_b64
-
+            import win32com.client
+            shell = win32com.client.Dispatch("WScript.Shell")
+            sl = shell.CreateShortcut(lnk_path)
+            target = getattr(sl, "TargetPath", "") or ""
+            wd = getattr(sl, "WorkingDirectory", "") or ""
+            if target and os.path.exists(target):
+                return target
+            if target and wd and not os.path.isabs(target):
+                combined = os.path.join(wd, target)
+                if os.path.exists(combined):
+                    return combined
+            if target:
+                return target
         except Exception:
-            return cls._default_icon()
+            return None
+        return None
+
+    @classmethod
+    def extract_from_exe(cls, exe_path: str, size: int = 48) -> str:
+        """兼容旧名称；内部走 extract_from_file_generic（图片/文档/.lnk 都支持）"""
+        return cls.extract_from_file_generic(exe_path, size=size)
+
 
     @classmethod
     def extract_from_url(cls, url: str, size: int = 48) -> str:
@@ -4351,27 +5375,45 @@ class IconExtractor:
 
     @classmethod
     def extract_async(cls, stype: str, path: str, callback):
-        """异步提取图标，完成后在主线程调用 callback(base64_str)"""
-        import threading
+        """异步提取图标，完成后在主线程调用 callback(base64_str)
+        v3.2.1:
+          - stype=app → extract_from_file_generic（文档/图片/.lnk/.msc/.cpl 全覆盖）
+          - stype=system → resolve_system_cmd_path 出真实 EXE 再提取图标（系统命令也有图标）
+          - stype=url → extract_from_url
+        """
 
         def worker():
-            if stype == "app":
-                result = cls.extract_from_exe(path)
-            elif stype == "url":
-                result = cls.extract_from_url(path)
-            else:
+            try:
+                if stype == "app":
+                    result = cls.extract_from_file_generic(path)
+                elif stype == "url":
+                    result = cls.extract_from_url(path)
+                elif stype == "system":
+                    real = cls.resolve_system_cmd_path(path)
+                    if real and os.path.exists(real):
+                        result = cls.extract_from_file_generic(real)
+                    else:
+                        # 系统没解析出来时，按路径本身提一次（.msc/.cpl 等用文件图标）
+                        result = cls.extract_from_file_generic(path)
+                        if not result or result == cls._default_icon():
+                            result = cls._default_icon()
+                else:
+                    result = cls._default_icon()
+            except Exception:
                 result = cls._default_icon()
-            # 在主线程调用回调，检查 root 是否仍然存在
             try:
                 import tkinter as _tk
                 root = _tk._default_root
                 if root is not None and root.winfo_exists():
-                    root.after_idle(lambda: callback(result))
+                    root.after_idle(lambda cb=callback, r=result: cb(r))
             except Exception:
                 pass
 
         t = threading.Thread(target=worker, daemon=True)
         t.start()
+
+
+
 
 
 # --- 系统功能预设 ---
@@ -4575,7 +5617,7 @@ class QuickLaunchView(BaseView):
             hover_color=("gray70", "gray30"),
             text_color=("gray15", "gray85"),
             corner_radius=15,
-            font=ctk.CTkFont(size=16),
+            font=ctk.CTkFont(family="微软雅黑", size=16),
             command=self._show_category_manager,
         ).pack(side="right")
 
@@ -4751,12 +5793,12 @@ class QuickLaunchView(BaseView):
         if sc.get("pinned", False):
             ctk.CTkLabel(
                 card, text="📌",
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family="微软雅黑", size=11),
             ).place(relx=1.0, rely=0.0, anchor="ne", x=-4, y=2)
         if sc.get("locked", False):
             ctk.CTkLabel(
                 card, text="🔒",
-                font=ctk.CTkFont(size=11),
+                font=ctk.CTkFont(family="微软雅黑", size=11),
             ).place(relx=0.0, rely=0.0, anchor="nw", x=4, y=2)
 
         # 事件状态
@@ -5159,8 +6201,7 @@ class QuickLaunchView(BaseView):
         # v3.0.1 更名总开关关闭时拦截
         try:
             if not self.config.get_category_rename_enabled():
-                from tkinter import messagebox as _mb
-                _mb.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。", parent=self)
+                messagebox.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。", parent=self)
                 return
         except Exception:
             pass
@@ -7498,13 +8539,13 @@ class WorkbenchApp(ctk.CTk):
 
         ctk.CTkLabel(
             bottom_frame, text=f"v{APP_VERSION}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=11, weight="bold"),
+            font=ctk.CTkFont(family="微软雅黑", size=11, weight="bold"),
             text_color=("gray46", "gray56"),
         ).pack(pady=(0, 2))
 
         ctk.CTkLabel(
             bottom_frame, text=f"© 2026 {COPYRIGHT_OWNER} · {COPYRIGHT_SITE}",
-            font=ctk.CTkFont(family=("Segoe UI Variable", "微软雅黑"), size=10),
+            font=ctk.CTkFont(family="微软雅黑", size=10),
             text_color=("gray42", "gray52"),
         ).pack()
 
@@ -7611,8 +8652,7 @@ class WorkbenchApp(ctk.CTk):
         # v3.0.1 更名总开关关闭时拦截
         try:
             if not self.config.get_category_rename_enabled():
-                from tkinter import messagebox as _mb
-                _mb.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。")
+                messagebox.showinfo("更名已关闭", "更名操作已被关闭。\n如需开启，请到 设置 → 导航设置 → 更名设置。")
                 return
         except Exception:
             pass
@@ -7904,7 +8944,7 @@ class WorkbenchApp(ctk.CTk):
         # 锁图标
         ctk.CTkLabel(
             center, text="🔒",
-            font=ctk.CTkFont(size=48),
+            font=ctk.CTkFont(family="微软雅黑", size=48),
         ).pack(pady=(0, 20))
 
         # 应用名称
@@ -8273,8 +9313,8 @@ def _make_app_icon_pil(size=(64, 64)):
         font_candidates = [
             ("arial.ttf", font_size),
             ("arialbd.ttf", font_size),
-            ("C:\\Windows\\Fonts\\arial.ttf", font_size),
-            ("C:\\Windows\\Fonts\\arialbd.ttf", font_size),
+            (os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts", "arial.ttf"), font_size),
+            (os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts", "arialbd.ttf"), font_size),
             ("msyhbd.ttc", font_size),
             ("msyh.ttc", font_size),
             ("simhei.ttf", font_size),
@@ -8453,8 +9493,8 @@ def _make_z_icon_pil(size=(32, 32)):
         # 白色 Z 字母（优先 Arial，按尺寸缩放）
         font_size = max(8, int(W * 0.58))
         font = None
-        for fpath in ["arial.ttf", "C:\\Windows\\Fonts\\arial.ttf",
-                      "arialbd.ttf", "C:\\Windows\\Fonts\\arialbd.ttf"]:
+        for fpath in ["arial.ttf", os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts", "arial.ttf"),
+                      "arialbd.ttf", os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts", "arialbd.ttf")]:
             try:
                 font = ImageFont.truetype(fpath, font_size)
                 break
@@ -8926,7 +9966,6 @@ if __name__ == "__main__":
             f.write(f"时间: {datetime.now().isoformat()}\n")
             f.write(f"版本: {APP_VERSION}\n")
             f.write(f"错误:\n{traceback.format_exc()}\n")
-        from tkinter import messagebox
         messagebox.showerror(
             "知行工作台 - 错误",
             f"应用启动失败：\n\n{e}\n\n"
