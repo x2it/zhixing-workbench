@@ -2459,10 +2459,10 @@ class PomodoroTimer:
         return f"{m:02d}:{s:02d}"
 
     def status_text(self):
-        """v3.2.1 区分 paused / running：避免暂停了还显示「工作中」误导用户。"""
+        """区分 4 态：运行+工作/运行+休息 / 暂停+工作/暂停+休息"""
         if self.is_running:
             return "休息中 ☕" if self.is_break else "工作中 🍅"
-        return "已暂停（休息）" if self.is_break else "已暂停（工作）"
+        return "暂停·休息" if self.is_break else "暂停·工作"
 
     def _after(self, ms, callback):
         """v3.2.1：优先走 master.after；否则回退 _tk._default_root。"""
@@ -2583,6 +2583,23 @@ class TodoView(BaseView):
             label_text="",
         )
         self.list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
+        # v3.2.1：CTkScrollableFrame 默认 inner_frame 宽度不跟随窗口放大/缩小，强制 canvas 宽度联动
+        try:
+            _can = getattr(self.list_frame, "_canvas", None) or getattr(self.list_frame, "_scrollbar_canvas", None)
+            _inner = getattr(self.list_frame, "_inner_frame", None) or getattr(self.list_frame, "_grid_frame", None)
+            if _can is not None and _inner is not None:
+                def _on_canvas_resize(_e, _c=_can, _i=_inner):
+                    _wgt = "!frame"
+                    for _ch in _c.find_all():
+                        _t = _c.type(_ch)
+                        if _t == "window":
+                            try: _c.itemconfig(_ch, width=_e.width)
+                            except Exception: pass
+                            break
+                _can.bind("<Configure>", _on_canvas_resize, add="+")
+                # 立刻同步一次，避免首次渲染还是旧宽度
+                _can.after(5, lambda _c=_can, _i=_inner: _c.event_generate("<Configure>"))
+        except Exception: pass
         self._pomodoro_timers = {}  # todo_id -> PomodoroTimer
         self._active_tooltips = []  # 防止 tooltip 残留
         self._refresh_list()
@@ -2686,7 +2703,12 @@ class TodoView(BaseView):
                 except Exception:
                     pass
 
-        for widget in self.list_frame.winfo_children():
+        # v3.2.1：CTkScrollableFrame 真实内容容器是 _inner_frame / _grid_frame，
+        # self.list_frame.winfo_children() 拿的是 CTk 内部结构（_scrollbar / _canvas / _parent_frame 等），
+        # 直接 destroy 不但清不干净旧 outer，还可能破坏滚动组件。
+        _todo_inner = getattr(self.list_frame, "_inner_frame", None) or getattr(self.list_frame, "_grid_frame", None)
+        _clear_target = _todo_inner if _todo_inner is not None and _todo_inner.winfo_exists() else self.list_frame
+        for widget in _clear_target.winfo_children():
             try:
                 widget.destroy()
             except Exception:
@@ -2920,8 +2942,12 @@ class TodoView(BaseView):
         if not info:
             return
         if not info["expanded"]:
+            # v3.2.1 兜底：frame 必须存在且 master 有效，不允许 pack orphan widget
+            frame = info.get("frame")
+            if frame is None or not frame.winfo_exists():
+                info["expanded"] = False
+                return
             info["expanded"] = True
-            frame = info["frame"]
             if info["timer"] is None:
                 timer = PomodoroTimer(
                     master=self,
@@ -2989,19 +3015,17 @@ class TodoView(BaseView):
             self._collapse_pomodoro(todo_id)
 
     def _collapse_pomodoro(self, todo_id):
-        """v3.2.1：收起不销毁 timer 对象，保留快照（剩余秒数、运行状态），
-        下次展开直接接续，避免 _refresh_list 重建时丢引用。"""
+        """v3.2.1：收起不销毁 timer 对象，也不暂停！折叠后继续倒计时。
+        仅隐藏 UI 面板，保留快照 + is_running 状态，🍅 按钮会保持锁色亮红。"""
         info = self._pomodoro_timers.get(todo_id)
-        if info and info["timer"]:
-            info["timer"].pause()
-        if info and info["frame"].winfo_exists():
+        if info and info.get("frame") and info["frame"].winfo_exists():
             info["frame"].pack_forget()
             for child in info["frame"].winfo_children():
                 try: child.destroy()
                 except Exception: pass
         if info:
             info["expanded"] = False
-            # timer 对象保留在 info["timer"]，不复 None
+            # ⚠️ 不再调用 timer.pause()：折叠后继续跑；timer 对象一直保留
             # v3.2.1：折叠后同步 🍅 按钮颜色（运行中=激活红，暂停/未开始=默认透明，用户折叠也能看到状态）
             t2 = info.get("timer")
             btn2 = info.get("btn")
@@ -3121,9 +3145,9 @@ class TodoView(BaseView):
                 status_color = ("#b03a2e", "#ff6b6b")   # 工作：亮红
         else:
             if timer.is_break:
-                status_color = ("#6b8e6b", "#6b8e7a")   # 暂停（休息）：灰绿
+                status_color = ("#6b8e6b", "#6b8e7a")   # 暂停·休息：灰绿
             else:
-                status_color = ("#8c6b6b", "#b08585")   # 暂停（工作）：灰红
+                status_color = ("#8c6b6b", "#b08585")   # 暂停·工作：灰红
         time_label_txt = f"{timer.format_time()}  │  {timer.status_text()}"
         time_label = info.get("time_label")
         if time_label and time_label.winfo_exists():
@@ -3374,7 +3398,7 @@ class NotesView(BaseView):
         input_frame.pack(fill="x", padx=30, pady=(0, 15))
 
         # v3.2.1：输入中途只做「草稿缓存」，不自动生成新笔记条目（避免停顿时重复生成半截笔记）
-        title_ph = "笔记标题...（草稿自动保存，不会自动生成新条目；按 保存笔记 / Ctrl+S 才算保存为一条新笔记）"
+        title_ph = "笔记标题...（Ctrl+S 或 保存 按钮完成保存）"
         self.note_title = ctk.CTkEntry(
             input_frame, placeholder_text=title_ph,
             height=36, font=ctk.CTkFont(family="微软雅黑", size=14),
@@ -3398,7 +3422,7 @@ class NotesView(BaseView):
             try:
                 if self._note_autosave_label is not None:
                     self._note_autosave_label.configure(
-                        text="✓ 草稿已保存（Ctrl+S 保存）",
+                        text="✓ 已自动保存草稿",
                         text_color=("#237a3e", "#5fd28e"),
                     )
             except Exception:
@@ -3444,7 +3468,7 @@ class NotesView(BaseView):
         bottom_bar = ctk.CTkFrame(input_frame, fg_color="transparent")
         bottom_bar.pack(fill="x", padx=15, pady=(0, 15))
         self._note_autosave_label = ctk.CTkLabel(
-            bottom_bar, text="✓ 草稿已开启（仅缓存，不生成新条目）",
+            bottom_bar, text="✓ 草稿自动保存已开启",
             font=ctk.CTkFont(family="微软雅黑", size=11),
             text_color=("gray50", "gray55"),
         )
@@ -3466,7 +3490,7 @@ class NotesView(BaseView):
                 # 如果有草稿，状态行标记一下
                 if self._note_autosave_label is not None:
                     self._note_autosave_label.configure(
-                        text="✓ 已还原上次未保存的草稿（继续编辑或点右侧按钮正式保存）",
+                        text="✓ 已还原上次未保存的内容，点右侧按钮正式保存",
                         text_color=("#237a3e", "#5fd28e"),
                     )
         except Exception:
@@ -3479,6 +3503,20 @@ class NotesView(BaseView):
         # 笔记列表
         self.list_frame = ctk.CTkScrollableFrame(self, fg_color="transparent", label_text="")
         self.list_frame.pack(fill="both", expand=True, padx=30, pady=(0, 30))
+        # v3.2.1：CTkScrollableFrame inner_frame 宽度自适应（防止放大窗口后笔记卡片右侧黑边 / 小窗口挤不开）
+        try:
+            _can = getattr(self.list_frame, "_canvas", None) or getattr(self.list_frame, "_scrollbar_canvas", None)
+            _inner = getattr(self.list_frame, "_inner_frame", None) or getattr(self.list_frame, "_grid_frame", None)
+            if _can is not None and _inner is not None:
+                def _on_canvas_resize_n(_e, _c=_can, _i=_inner):
+                    for _ch in _c.find_all():
+                        if _c.type(_ch) == "window":
+                            try: _c.itemconfig(_ch, width=_e.width)
+                            except Exception: pass
+                            break
+                _can.bind("<Configure>", _on_canvas_resize_n, add="+")
+                _can.after(5, lambda _c=_can: _c.event_generate("<Configure>"))
+        except Exception: pass
         self._refresh_list()
         self.after(100, lambda: apply_card_scrollbar(self.list_frame, "dark"))
 
@@ -3518,7 +3556,7 @@ class NotesView(BaseView):
             def _reset():
                 try:
                     lbl.configure(
-                        text="✓ 草稿已开启（仅缓存，不生成新条目）",
+                        text="✓ 草稿自动保存已开启",
                         text_color=("gray50", "gray55"),
                     )
                 except Exception: pass
@@ -3545,8 +3583,12 @@ class NotesView(BaseView):
         return text[:max_chars - 1].rstrip() + "…"
 
     def _refresh_list(self):
-        for widget in self.list_frame.winfo_children():
-            widget.destroy()
+        # v3.2.1：CTkScrollableFrame 真实内容容器是 _inner_frame / _grid_frame
+        _note_inner = getattr(self.list_frame, "_inner_frame", None) or getattr(self.list_frame, "_grid_frame", None)
+        _clear_note = _note_inner if _note_inner is not None and _note_inner.winfo_exists() else self.list_frame
+        for widget in _clear_note.winfo_children():
+            try: widget.destroy()
+            except Exception: pass
 
         notes = self.config.notes
         if not notes:
@@ -3663,7 +3705,7 @@ class NotesView(BaseView):
             font=ctk.CTkFont(family="微软雅黑", size=16, weight="bold"),
         ).pack(anchor="w", padx=25, pady=(20, 10))
 
-        title_ph = "笔记标题...（Ctrl+S 或 保存 按钮）"
+        title_ph = "笔记标题...（Ctrl+S 保存）"
         title_entry = ctk.CTkEntry(
             dlg, height=38,
             font=ctk.CTkFont(family="微软雅黑", size=14),
@@ -3717,7 +3759,7 @@ class NotesView(BaseView):
                 if dirty["saved_once"]:
                     status_lbl.configure(text="● 有未保存改动", text_color=("#a15c00", "#d79b44"))
                 else:
-                    status_lbl.configure(text="● 未保存（0.8s 自动存盘）", text_color=("#c0392b", "#ff9f9f"))
+                    status_lbl.configure(text="● 未保存 · 输入即自动存", text_color=("#c0392b", "#ff9f9f"))
             except Exception:
                 pass
             if edit_autosave["job"]:
@@ -3931,7 +3973,7 @@ class SettingsView(BaseView):
 
         self._autosave_switch = ctk.CTkSwitch(
             run_section,
-            text="1.5s 防抖 · 失焦保存 · Ctrl+S 立即保存",
+            text="停手就保存 · 1.5s 延迟 · Ctrl+S 立刻存",
             font=ctk.CTkFont(family="微软雅黑", size=13),
             command=self._toggle_autosave,
         )
@@ -4067,18 +4109,18 @@ class SettingsView(BaseView):
         self.config.set_autosave_enabled(on)
         # 让 UI 刷新一下状态行
         self.after(0, self._refresh_autosave_hint)
-        self._show_toast(("自动保存已开启" if on else "自动保存已关闭"), kind="info", duration_ms=2000)
+        self._show_toast(("已开启自动保存" if on else "已关闭自动保存"), kind="info", duration_ms=2000)
 
     def _refresh_autosave_hint(self):
         try:
             if self.config.get_autosave_enabled():
                 self._autosave_hint.configure(
-                    text="  已开启：笔记 1.5s · 待办 2s · 失焦/Ctrl+S 立即保存",
+                    text="  已开启：停手就自动保存，Ctrl+S 立刻存",
                     text_color=("#237a3e", "#5fd28e"),
                 )
             else:
                 self._autosave_hint.configure(
-                    text="  已关闭：需手动点「保存 / 添加」按钮",
+                    text="  已关闭：需手动点 保存 / 添加",
                     text_color=("#a15c00", "#d79b44"),
                 )
         except Exception:
