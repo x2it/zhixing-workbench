@@ -2459,9 +2459,9 @@ class PomodoroTimer:
         return f"{m:02d}:{s:02d}"
 
     def status_text(self):
-        """区分 4 态：运行+工作/运行+休息 / 暂停+工作/暂停+休息"""
+        """纯文字 4 态（状态尾部不再重复 emoji，🍅/☕ 统一交给外层卡片按钮/面板文字颜色承载）"""
         if self.is_running:
-            return "休息中 ☕" if self.is_break else "工作中 🍅"
+            return "休息中" if self.is_break else "工作中"
         return "暂停·休息" if self.is_break else "暂停·工作"
 
     def _after(self, ms, callback):
@@ -2797,19 +2797,38 @@ class TodoView(BaseView):
         reset_btn.pack(side="left")
         info["reset_btn"] = reset_btn
         left_wrap = ctk.CTkFrame(inner, fg_color="transparent")
-        left_wrap.pack(side="left", fill="both", expand=True, padx=(10, 4), pady=4)
-        time_label = ctk.CTkLabel(
-            left_wrap, text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
+        left_wrap.pack(side="left", fill="both", expand=True, padx=(14, 4), pady=4)
+        # 数字：大粗等宽，一目了然
+        time_digits = ctk.CTkLabel(
+            left_wrap, text=timer.format_time(),
             font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
-            text_color=("#a93226", "#ff6b6b"), anchor="w", justify="left",
+            text_color=("#a93226", "#ff6b6b"), anchor="w",
         )
-        time_label.pack(side="left", fill="both", expand=True, anchor="w", padx=14, pady=10, ipady=4)
-        info["time_label"] = time_label
+        time_digits.pack(side="left", padx=(4, 0), pady=10)
+        # 分隔：小圆点（代替生硬的竖线 │），颜色浅灰不抢戏
+        sep_dot = ctk.CTkLabel(
+            left_wrap, text="·",
+            font=ctk.CTkFont(family="微软雅黑", size=18, weight="normal"),
+            text_color=("gray50", "gray55"), anchor="center",
+        )
+        sep_dot.pack(side="left", padx=10, pady=10)
+        # 状态：中文雅黑，字号略小、字重适中，比数字"轻"一级形成层级
+        status_txt = ctk.CTkLabel(
+            left_wrap, text=timer.status_text(),
+            font=ctk.CTkFont(family="微软雅黑", size=15, weight="normal"),
+            text_color=("#a93226", "#ff6b6b"), anchor="w",
+        )
+        status_txt.pack(side="left", padx=(0, 4), pady=10)
+        # 兼容旧键：time_label 指向 time_digits 方便判断 exists；新键分别存 3 个引用
+        info["time_label"] = time_digits
+        info["time_digits"] = time_digits
+        info["sep_dot"] = sep_dot
+        info["status_txt"] = status_txt
 
 
 
         try:
-            info["frame"].configure(fg_color=("gray82", "gray20"), corner_radius=12)
+            info["frame"].configure(fg_color=("gray86","gray18"), corner_radius=12,border_width=1, border_color=("gray80","gray24"))
         except Exception:
             pass
         info["frame"].pack(side="top", fill="x", padx=10, pady=(0, 10), before=None)
@@ -2986,19 +3005,34 @@ class TodoView(BaseView):
             reset_btn.pack(side="left")
             info["reset_btn"] = reset_btn
             left_wrap = ctk.CTkFrame(inner, fg_color="transparent")
-            left_wrap.pack(side="left", fill="both", expand=True, padx=(10, 4), pady=4)
-            time_label = ctk.CTkLabel(
-                left_wrap, text=f"  {timer.format_time()}   │   {timer.status_text()}  ",
+            left_wrap.pack(side="left", fill="both", expand=True, padx=(14, 4), pady=4)
+            time_digits = ctk.CTkLabel(
+                left_wrap, text=timer.format_time(),
                 font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
-                text_color=("#a93226", "#ff6b6b"), anchor="w", justify="left",
+                text_color=("#a93226", "#ff6b6b"), anchor="w",
             )
-            time_label.pack(side="left", fill="both", expand=True, anchor="w", padx=14, pady=10, ipady=4)
-            info["time_label"] = time_label
+            time_digits.pack(side="left", padx=(4, 0), pady=10)
+            sep_dot = ctk.CTkLabel(
+                left_wrap, text="·",
+                font=ctk.CTkFont(family="微软雅黑", size=18, weight="normal"),
+                text_color=("gray50", "gray55"), anchor="center",
+            )
+            sep_dot.pack(side="left", padx=10, pady=10)
+            status_txt = ctk.CTkLabel(
+                left_wrap, text=timer.status_text(),
+                font=ctk.CTkFont(family="微软雅黑", size=15, weight="normal"),
+                text_color=("#a93226", "#ff6b6b"), anchor="w",
+            )
+            status_txt.pack(side="left", padx=(0, 4), pady=10)
+            info["time_label"] = time_digits
+            info["time_digits"] = time_digits
+            info["sep_dot"] = sep_dot
+            info["status_txt"] = status_txt
 
 
 
             try:
-                frame.configure(fg_color=("gray82", "gray20"), corner_radius=12)
+                frame.configure(fg_color=("gray86","gray18"), corner_radius=12,border_width=1, border_color=("gray80","gray24"))
             except Exception:
                 pass
             frame.pack(side="top", fill="x", padx=10, pady=(0, 10), before=None)
@@ -3131,7 +3165,7 @@ class TodoView(BaseView):
             try:
                 if not info["frame"].winfo_ismapped():
                     try:
-                        info["frame"].configure(fg_color=("gray82", "gray20"), corner_radius=12)
+                        info["frame"].configure(fg_color=("gray86","gray18"), corner_radius=12,border_width=1, border_color=("gray80","gray24"))
                     except Exception:
                         pass
                     info["frame"].pack(side="top", fill="x", padx=10, pady=(0, 10))
@@ -3148,17 +3182,30 @@ class TodoView(BaseView):
                 status_color = ("#6b8e6b", "#6b8e7a")   # 暂停·休息：灰绿
             else:
                 status_color = ("#8c6b6b", "#b08585")   # 暂停·工作：灰红
-        time_label_txt = f"{timer.format_time()}  │  {timer.status_text()}"
+        # 三控件分别刷新：时间（变色+换字）/ 圆点（保持灰）/ 状态文字（变色+换字）
+        t_dig = info.get("time_digits")
+        s_txt = info.get("status_txt")
+        s_dot = info.get("sep_dot")
+        if t_dig and t_dig.winfo_exists():
+            try: t_dig.configure(text=timer.format_time(), text_color=status_color)
+            except Exception: pass
+        if s_txt and s_txt.winfo_exists():
+            try: s_txt.configure(text=timer.status_text(), text_color=status_color)
+            except Exception: pass
+        if s_dot and s_dot.winfo_exists():
+            try:
+                # 分隔圆点颜色不跟随状态：一直保持中性灰，视觉上不抢戏
+                s_dot.configure(text_color=("gray50","gray55"))
+            except Exception: pass
+        # 兼容旧单label路径（例如首次还没来得及重建info子键时）
         time_label = info.get("time_label")
-        if time_label and time_label.winfo_exists():
+        if (t_dig is None or not t_dig.winfo_exists()) and time_label and time_label.winfo_exists():
             try:
                 time_label.configure(
-                    text=f"  {time_label_txt}  ",
+                    text=f"{timer.format_time()}  ·  {timer.status_text()}",
                     text_color=status_color,
                 )
-            except Exception as _e_tl:
-                try: PomodoroTimer._log_trace(f"time_label conf exc: {_e_tl}")
-                except Exception: pass
+            except Exception: pass
         # 更新切换按钮：暂停时显示▶继续(青绿)，运行中显示⏸暂停(深红)
         toggle_btn = info.get("toggle_btn")
         reset_btn = info.get("reset_btn")
