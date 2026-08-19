@@ -2459,10 +2459,16 @@ class PomodoroTimer:
         return f"{m:02d}:{s:02d}"
 
     def status_text(self):
-        """纯文字 4 态（状态尾部不再重复 emoji，🍅/☕ 统一交给外层卡片按钮/面板文字颜色承载）"""
+        """纯文字 4 态（无 emoji / 无小圆点 / 无竖线 / 无括号，100% 扁平中文短语）
+        番茄法心智统一用「专注」代替通用的「工作」：
+        - 进行中（工作段）→ 专注中    （= 正在专注，产品感强，无歧义）
+        - 进行中（休息段）→ 休息中    （保留用户最熟的说法）
+        - 已暂停（工作段）→ 暂停专注  （主谓结构：状态=暂停，阶段=专注，秒懂）
+        - 已暂停（休息段）→ 暂停休息  （同理）
+        """
         if self.is_running:
-            return "休息中" if self.is_break else "工作中"
-        return "暂停·休息" if self.is_break else "暂停·工作"
+            return "休息中" if self.is_break else "专注中"
+        return "暂停休息" if self.is_break else "暂停专注"
 
     def _after(self, ms, callback):
         """v3.2.1：优先走 master.after；否则回退 _tk._default_root。"""
@@ -2798,20 +2804,13 @@ class TodoView(BaseView):
         info["reset_btn"] = reset_btn
         left_wrap = ctk.CTkFrame(inner, fg_color="transparent")
         left_wrap.pack(side="left", fill="both", expand=True, padx=(14, 4), pady=4)
-        # 数字：大粗等宽，一目了然
+        # 数字：大粗等宽，一目了然；右侧直接 padx 留足 20px 纯空白代替「·」/「│」等任何分隔符，做到 100% 纯平
         time_digits = ctk.CTkLabel(
             left_wrap, text=timer.format_time(),
             font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
             text_color=("#a93226", "#ff6b6b"), anchor="w",
         )
-        time_digits.pack(side="left", padx=(4, 0), pady=10)
-        # 分隔：小圆点（代替生硬的竖线 │），颜色浅灰不抢戏
-        sep_dot = ctk.CTkLabel(
-            left_wrap, text="·",
-            font=ctk.CTkFont(family="微软雅黑", size=18, weight="normal"),
-            text_color=("gray50", "gray55"), anchor="center",
-        )
-        sep_dot.pack(side="left", padx=10, pady=10)
+        time_digits.pack(side="left", padx=(4, 20), pady=10)
         # 状态：中文雅黑，字号略小、字重适中，比数字"轻"一级形成层级
         status_txt = ctk.CTkLabel(
             left_wrap, text=timer.status_text(),
@@ -2819,10 +2818,9 @@ class TodoView(BaseView):
             text_color=("#a93226", "#ff6b6b"), anchor="w",
         )
         status_txt.pack(side="left", padx=(0, 4), pady=10)
-        # 兼容旧键：time_label 指向 time_digits 方便判断 exists；新键分别存 3 个引用
+        # 兼容旧键：time_label 指向 time_digits 方便判断 exists；新键分别存引用
         info["time_label"] = time_digits
         info["time_digits"] = time_digits
-        info["sep_dot"] = sep_dot
         info["status_txt"] = status_txt
 
 
@@ -3011,13 +3009,7 @@ class TodoView(BaseView):
                 font=ctk.CTkFont(family="Consolas", size=20, weight="bold"),
                 text_color=("#a93226", "#ff6b6b"), anchor="w",
             )
-            time_digits.pack(side="left", padx=(4, 0), pady=10)
-            sep_dot = ctk.CTkLabel(
-                left_wrap, text="·",
-                font=ctk.CTkFont(family="微软雅黑", size=18, weight="normal"),
-                text_color=("gray50", "gray55"), anchor="center",
-            )
-            sep_dot.pack(side="left", padx=10, pady=10)
+            time_digits.pack(side="left", padx=(4, 20), pady=10)
             status_txt = ctk.CTkLabel(
                 left_wrap, text=timer.status_text(),
                 font=ctk.CTkFont(family="微软雅黑", size=15, weight="normal"),
@@ -3026,7 +3018,6 @@ class TodoView(BaseView):
             status_txt.pack(side="left", padx=(0, 4), pady=10)
             info["time_label"] = time_digits
             info["time_digits"] = time_digits
-            info["sep_dot"] = sep_dot
             info["status_txt"] = status_txt
 
 
@@ -3179,10 +3170,10 @@ class TodoView(BaseView):
                 status_color = ("#b03a2e", "#ff6b6b")   # 工作：亮红
         else:
             if timer.is_break:
-                status_color = ("#6b8e6b", "#6b8e7a")   # 暂停·休息：灰绿
+                status_color = ("#6b8e6b", "#6b8e7a")   # 暂停休息：灰绿
             else:
-                status_color = ("#8c6b6b", "#b08585")   # 暂停·工作：灰红
-        # 三控件分别刷新：时间（变色+换字）/ 圆点（保持灰）/ 状态文字（变色+换字）
+                status_color = ("#8c6b6b", "#b08585")   # 暂停专注：灰红
+        # 控件刷新：时间（变色+换字）/ 状态文字（变色+换字）；sep_dot 兼容旧快照，存在即刷（新版已移除小圆点）
         t_dig = info.get("time_digits")
         s_txt = info.get("status_txt")
         s_dot = info.get("sep_dot")
