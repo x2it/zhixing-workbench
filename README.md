@@ -56,16 +56,16 @@
 
 ### 从源码运行
 
-`ash
+```bash
 pip install -r requirements.txt
 python main.py
-`
+```
 
 > 首次启动：弹出「欢迎使用知行工作台」窗口，引导你输入两次密码（至少 6 位）→ 点「完成设置」→ 进入主界面。**没有默认密码。**
 
 ### 打包构建
 
-`ash
+```bash
 # 1) 绿色便捷版 + 无控制台 (onedir / windowed)
 pyinstaller --clean --noconfirm ZhixingWorkbench.spec
 #   产物: dist/知行工作台/知行工作台.exe  （双击即运行，不弹 CMD）
@@ -77,7 +77,7 @@ makensis setup_installer.nsi
 # 3) 微软商店 MSIX (需 Windows 10+ SDK makeappx)
 python build_msix.py
 #   产物: dist/ZhixingWorkbench.msix
-`
+```
 
 ## 日志与调试
 
