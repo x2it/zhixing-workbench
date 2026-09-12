@@ -3,8 +3,9 @@ import hashlib
 import zipfile
 
 def create_msix():
-    staging_dir = r"C:\Users\Administrator\Documents\trae_projects\zhixing_workbench\source\msix_staging"
-    output_file = r"C:\Users\Administrator\Documents\trae_projects\zhixing_workbench\source\dist\ZhixingWorkbench_v3.1.0.msix"
+    _src_root = os.path.dirname(os.path.abspath(__file__))
+    staging_dir = os.path.join(_src_root, "msix_staging")
+    output_file = os.path.join(_src_root, "dist", "ZhixingWorkbench.msix")
     
     # Remove existing output
     if os.path.exists(output_file):

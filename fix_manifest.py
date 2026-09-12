@@ -36,7 +36,7 @@ manifest = """<?xml version="1.0" encoding="utf-8"?>
 </Package>
 """
 
-path = r"C:\Users\Administrator\Documents\trae_projects\zhixing_workbench\source\msix_staging\AppxManifest.xml"
+path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "msix_staging", "AppxManifest.xml")
 with open(path, "w", encoding="utf-8") as f:
     f.write(manifest)
 print(f"Manifest updated: {os.path.getsize(path)} bytes")

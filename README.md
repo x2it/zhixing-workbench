@@ -68,15 +68,15 @@ python main.py
 `ash
 # 1) 绿色便捷版 + 无控制台 (onedir / windowed)
 pyinstaller --clean --noconfirm ZhixingWorkbench.spec
-#   产物: dist\知行工作台\知行工作台.exe  （双击即运行，不弹 CMD）
+#   产物: dist/知行工作台/知行工作台.exe  （双击即运行，不弹 CMD）
 
-# 2) NSIS 安装包 (需先安装 NSIS 3)
-"C:\Program Files (x86)\NSIS\makensis.exe" setup_installer.nsi
-#   产物: dist\知行工作台_v{VERSION}_Setup.exe
+# 2) NSIS 安装包 (需先安装 NSIS 3，确保 makensis 在 PATH 中)
+makensis setup_installer.nsi
+#   产物: dist/知行工作台_v<VERSION>_Setup.exe
 
-# 3) 微软商店 MSIX (需 Windows 10+ SDK makeappx.exe)
-python build_msix_v2.py
-#   产物: dist\ZhixingWorkbench_v{VERSION}.msix
+# 3) 微软商店 MSIX (需 Windows 10+ SDK makeappx)
+python build_msix.py
+#   产物: dist/ZhixingWorkbench.msix
 `
 
 ## 日志与调试
