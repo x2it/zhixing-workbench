@@ -1,10 +1,14 @@
-# 知行工作台
+# 知行工作台 · Zhixing Workbench
 
 > 知行工作室 出品 · 个人桌面工作台应用 v3.2.0
 > 致 虚 极 / 守 静 笃
 
 一款简约、可扩展的 Windows 桌面效率工具。集成快捷启动、待办管理、笔记记录、番茄钟计时等功能。
 基于 Python + CustomTkinter 开发，界面采用扁平化简约设计风格，支持首次启动自定义密码登录与数据加密存储。
+
+**Zhixing Workbench** is a minimalist, extensible Windows desktop productivity app — a personal workbench combining quick launcher, todo management, notes, and a pomodoro timer. Built with Python + CustomTkinter, featuring flat minimalist design, custom password login on first launch, and AES-encrypted local data storage. 100% offline: no network requests, no telemetry, no cloud sync.
+
+<img src="https://raw.githubusercontent.com/x2it/zhixing-workbench/main/banner.png" alt="知行工作台 · Zhixing Workbench" width="100%">
 
 ## 功能特性
 
@@ -24,7 +28,7 @@
 - **托盘最小化**：关闭窗口自动收纳到系统托盘（pystray），后台运行不干扰；双击托盘 / 右键菜单「显示主窗口」恢复
 - **本地存储**：安装版 ~/.zhixing_workbench/、便携版程序同级 data/；支持便携版与安装版数据自动迁移合并
 - **系统集成**：进程级 + 窗口级 AppUserModelID（v3），任务栏图标 / 固定到任务栏 / 跳转列表正确关联
-- **无控制台窗口（v3.2）**：打包产物使用 unw.exe 启动器（console=False），运行时不再弹出 CMD 黑窗；所有调试信息写入 %APPDATA%\zhixing_workbench\debug.log 文件日志（超过 500KB 自动轮转）
+- **无控制台窗口（v3.2）**：打包产物使用 unw.exe 启动器（console=False），运行时不再弹出 CMD 黑窗；所有调试信息写入 %APPDATA%\zhixing_workbench\debug.log 文件日志（超过 500KB 自动轮转）
 
 ## 页面导航（与代码 NAV_ITEMS 一致）
 
@@ -103,7 +107,7 @@ v3.2 生产环境不再依赖控制台。所有运行时日志统一写入：
 
 ## 许可证
 
-[MIT License](LICENSE) - Copyright (c) 2026 知行工作室
+[MIT](LICENSE) © 2026 知行工作室 Zhixing Studio · [https://w3b.pub/](https://w3b.pub/) · support@w3b.pub
 
 ## 相关
 
