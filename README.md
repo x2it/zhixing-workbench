@@ -107,7 +107,7 @@ v3.2 生产环境不再依赖控制台。所有运行时日志统一写入：
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 知行工作室 Zhixing Studio · [https://w3b.pub/](https://w3b.pub/) · support@w3b.pub
+[MIT](LICENSE) © 2026 知行工作室 · [https://w3b.pub/](https://w3b.pub/) · support@w3b.pub
 
 ## 相关
 
