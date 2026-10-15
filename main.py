@@ -8229,7 +8229,7 @@ class QuickLaunchView(BaseView):
 # ============================================================
 # 主应用窗口
 # ============================================================
-APP_USER_MODEL_ID = "ZhixingStudio.Workbench.v3"
+APP_USER_MODEL_ID = "Zhixing.Workbench.v3"
 
 
 def set_process_app_user_model_id(appid=APP_USER_MODEL_ID):

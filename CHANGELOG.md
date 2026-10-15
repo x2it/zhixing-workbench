@@ -124,7 +124,7 @@
 - **打包配置污染**：`ZhixingWorkbench.spec` / `version_info.txt` / `setup_installer.nsi` 被本地路径字符串误写 → 重写为标准版本，`PyInstaller --version-file` 校验通过
 
 ### 变更
-- `APP_USER_MODEL_ID`：`ZhixingStudio.Workbench.v2` → `ZhixingStudio.Workbench.v3`
+- `APP_USER_MODEL_ID`：升级为独立的 v3 标识符 `Zhixing.Workbench.v3`（与 v2 隔离，保证任务栏固定项与跳转列表正确关联）
 
 ---
 

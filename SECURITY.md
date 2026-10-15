@@ -57,7 +57,7 @@ v2.3.18 起支持自动锁屏：
 
 ### 5. AppUserModelID
 
-v3.0 起进程级 + 窗口级 + 快捷方式三层写入 `ZhixingStudio.Workbench.v3`：
+v3.0 起进程级 + 窗口级 + 快捷方式三层写入 `Zhixing.Workbench.v3`：
 - 防止恶意程序通过窗口 AppID 冒用本应用的任务栏固定项与跳转列表
 - 确保右键「固定到任务栏」后图标 / 名字正确关联本应用
 
