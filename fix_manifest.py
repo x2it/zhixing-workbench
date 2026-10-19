@@ -6,7 +6,7 @@ manifest = """<?xml version="1.0" encoding="utf-8"?>
          IgnorableNamespaces="uap">
   <Identity Name="DAD0384E.595150F4F75BE"
             Publisher="CN=856DEE8D-D8FF-4895-A3B1-4155E3824692"
-            Version="3.1.0.0" />
+            Version="3.2.1.0" />
 
   <Properties>
     <DisplayName>知行工作台</DisplayName>
