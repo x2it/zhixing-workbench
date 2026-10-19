@@ -1,5 +1,7 @@
 # 知行工作台 · Zhixing Workbench
 
+![License](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)
+
 > 知行工作室 出品 · 个人桌面工作台应用 v3.2.1
 > 致 虚 极 / 守 静 笃
 
@@ -107,7 +109,7 @@ v3.2 生产环境不再依赖控制台。所有运行时日志统一写入：
 
 ## 许可证
 
-[MIT](LICENSE) © 2026 知行工作室 · [https://w3b.pub/](https://w3b.pub/) · support@w3b.pub
+[AGPL-3.0](LICENSE) © 2026 知行工作室 · [https://w3b.pub/](https://w3b.pub/) · support@w3b.pub
 
 ## 相关
 
